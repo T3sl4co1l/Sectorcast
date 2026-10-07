@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <stdbool.h>
 
+#define numelem(x)			( sizeof(x) / sizeof(x[0]) )
+
 BOOL OnPaint(void);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow);

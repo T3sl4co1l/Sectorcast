@@ -15,15 +15,21 @@
 #define GRPH_MOVESTEP 	0.08f
 /** Square bounding box for the player's collision */
 #define GRPH_PLAYERSZ 	0.4f
-/** Height scaling of a ray */
+/** Draw column height scaling */
 #define GRPH_HEIGHT   	0.6f
 /** Number of rays/columns to draw */
 #define GRPH_COLUMNS  	240
+/** Number of vertical pixels to scale to */
+#define GRPH_ROWS     	640
+#define GRPH_HALFROWS 	(GRPH_ROWS / 2)
 /** Field-of-view multiplier (= tan(FOV/2)) */
 #define GRPH_FOVMULT  	1.0f
 /** Display-column vector increment */
-#define GRPH_COLSTEP  	(GRPH_FOVMULT / GRPH_COLUMNS)
-
+#define GRPH_COLSTEP  	(2.0f * GRPH_FOVMULT / GRPH_COLUMNS)
+/** Maximum number of sectors to raycast through */
+#define GRPH_MAX_RECURSION	20
+/** Extra columns in GrphContext_t.cols for recursive chaining */
+#define GRPH_RECBUF   	GRPH_COLUMNS
 
 /* * * Type Declarations * * */
 
@@ -35,7 +41,9 @@ enum GRPHCTRL_e {
 	GRPHCTRL_TURNRIGHT,
 	GRPHCTRL_STRAFELEFT,
 	GRPHCTRL_STRAFERIGHT,
-	GRPHCTRL_MAXKEY = GRPHCTRL_STRAFERIGHT
+	GRPHCTRL_FLYUP,
+	GRPHCTRL_FLYDOWN,
+	GRPHCTRL_MAXKEY = GRPHCTRL_FLYDOWN
 };
 
 /** Flags returned from doGameTic() */
@@ -55,7 +63,7 @@ typedef struct Vertex_s {
 
 typedef struct Side_s {
 	int sectorId;	/**< Backside sector, or -1 if single-sided    */
-	int sectorSide; /**< If backside sector specified, portal to this Side of that Sector; otherwise ignored */
+//	int sectorSide; /**< If backside sector specified, portal to this Side of that Sector; otherwise ignored */
 	int wallId;  	/**< Front-side wall descriptor (as ID)        */
 	Vertex to;   	/**< Side is drawn from previous point to here */
 } Side;
@@ -78,13 +86,15 @@ typedef struct __attribute__((aligned(4))) SectorFileHeader_s {
 
 /** Sector definition */
 typedef struct Sector_s {
-	int id;         	/**< Sector ID; index into map file's object allocation table, or -1 if invalid/unallocated */
-	int sides;       	/**< Size of flexible member (number of elements) */
-	PaletteId pal;  	/**< Room palette (as ID)     */
-	TextureId ceil; 	/**< Ceiling and... */
-	TextureId floor;	/**< ...floor texture (as ID) */
-	Vertex start;   	/**< Starting vertex (for quick access; same as last element of sides[]) */
-	Side side[8];    	/**< List of sides (fixed length for now) */
+	int id;           	/**< Sector ID; index into map file's object allocation table, or -1 if invalid/unallocated */
+	int sides;        	/**< Size of flexible member (number of elements) */
+	PaletteId pal;    	/**< Room palette (as ID) */
+	float ceilHeight; 	/**< Ceiling and...  */
+	float floorHeight;	/**< ...floor height */
+	TextureId ceilId; 	/**< Ceiling and...  */
+	TextureId floorId;	/**< ...floor texture (as ID) */
+	Vertex start;     	/**< Starting vertex (for quick access; same as last element of sides[]) */
+	Side side[8];     	/**< List of sides (fixed length for now) */
 } Sector_t;
 
 /** Data container for intersect() */
@@ -98,33 +108,29 @@ typedef struct Intersect_s {
 	float dist;      	/**< (out) Distance from ray origin to intersection (multiples of dir) */
 } Intersect_t;
 
-/** Fields of rayCast (pseudo)class */
+/** Graphical data in a single display column */
+typedef struct DrawCol_s {
+	int top;	/**< Upper wall (ceiling edge) screen coordinate */
+	int bot;	/**< Lower wall (floor edge) screen coordinate   */
+	TextureId ceilId; 	/**< Ceiling and...  */
+	TextureId floorId;	/**< ...floor texture (as ID) */
+	TextureId wallId;	/**< Wall texture (as ID); mid if next == 0, else upper and lower */
+	int frac;	/**< line intersection (u coordinate) */
+	int next;	/**< Index to next DrawCol (linked list) (draws upper and lower), or 0 (was a single-sided wall) */
+} DrawCol_t;
+
+/** Fields of Sectors (pseudo)class */
 typedef struct GraphicsContext_s {
+	float camA; 	/**< (in) Camera angle (radians) */
 	float camX; 	/**< (in) Camera x coordinate    */
 	float camY; 	/**< (in) Camera y coordinate    */
-	float camA; 	/**< (in) Camera angle (radians) */
-	int mapW;   	/**< (in) Column count of map array */
-	int mapH;   	/**< (in) Row count of map array    */
-	int* world; 	/**< (in) Pointer to map array; accessed as [x + y * mapH] */
-	Sector_t* sectors;
-	int currentSectorId;
-	bool controls[GRPHCTRL_MAXKEY + 1];	/**< (in) Control inputs */
-	float columns[GRPH_COLUMNS]; 	/**< (out) Column heights to display       */
-	int colColors[GRPH_COLUMNS]; 	/**< (out) Column color indices to display */
+	float camZ; 	/**< (in) Camera z coordinate    */
+	Sector_t* sectors;  	/**< (in) Pointer to sector list */
+	int sectorMax;      	/**< (in) Sector list length (indices 0 to sectorMax-1) */
+	int currentSectorId;	/**< (in/out) Sector the camera is in */
+	bool controls[GRPHCTRL_MAXKEY + 1];	/**< (in) Control inputs  */
+	DrawCol_t cols[GRPH_COLUMNS + GRPH_RECBUF];	/**< (out) Display columns */
 } GrphContext_t;
-
-/** Container for rayCast() parameters */
-typedef struct GrphRay_s {
-	int sector;  		/**<  (in) Index of sector to cast in */
-	float posX;     	/**<  (in) Origin x */
-	float posY;     	/**<  (in) Origin y */
-	float slopeX;   	/**<  (in) direction vector x */
-	float slopeY;   	/**<  (in) direction vector y */
-	float travel;   	/**< (out) Distance traveled along ray to nearest line (multiple of slope vector) */
-	float frac;     	/**< (out) Distance along struck line (0..1) */
-	int colr;       	/**< (out) Index of struck linedef */
-	bool wallHoriz; 	/**< (out) true: struck top/bottom of map block */
-} GrphRay_t;
 
 
 /* * * Shared Globals * * */
@@ -135,6 +141,5 @@ int doGameTic(GrphContext_t* ctx);
 bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY);
 bool intersect(Intersect_t* intr);
 void render(GrphContext_t* ctx);
-void rayCast(GrphContext_t* ctx, GrphRay_t* ray);
 
 #endif // SECTORS_H_INCLUDED

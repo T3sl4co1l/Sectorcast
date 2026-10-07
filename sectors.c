@@ -51,6 +51,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <math.h>
 #include "sectors.h"
 
@@ -59,45 +60,70 @@ Sector_t sectors[] = {
 		id: 0,
 		sides: 4,
 		pal: 0,
-		ceil: 0,
-		floor: 1,
+		ceilHeight: 0.7f,
+		floorHeight: -1.0f,
+		ceilId: 12,
+		floorId: 0,
 		start: { -2.0f, -1.3f },
 		side: {
 			{
 				sectorId: -1,
-				sectorSide: 0,
-				wallId: 4,
+				wallId: 3,
 				to: { -2.0f, 1.5f }
 			}, {
 				sectorId: -1,
-				sectorSide: 0,
 				wallId: 1,
 				to: { 1.0f, 1.5f }
 			}, {
-				sectorId: -1,
-				sectorSide: 0,
-				wallId: 2,
+				sectorId: 1,
+				wallId: 0,
 				to: { 1.0f, -1.5f }
 			}, {
 				sectorId: -1,
-				sectorSide: 0,
-				wallId: 3,
+				wallId: 2,
 				to: { -2.0f, -1.3f }
 			}
 		}
-//	}, {
+	}, {
+		id: 1,
+		sides: 4,
+		pal: 0,
+		ceilHeight: 1.0f,
+		floorHeight: -1.0f,
+		ceilId: 14,
+		floorId: 1,
+		start: { 1.0f, 1.5f },
+		side: {
+			{
+				sectorId: -1,
+				wallId: 4,
+				to: { 2.0f, 0.75f }
+			}, {
+				sectorId: -1,
+				wallId: 5,
+				to: { 2.0f, -0.75f }
+			}, {
+				sectorId: -1,
+				wallId: 6,
+				to: { 1.0f, -1.5f }
+			}, {
+				sectorId: 0,
+				wallId: 0,
+				to: { 1.0f, 1.5f }
+			}
+		}
 	}
 };
 
 /**
  *	Processes inputs and updates game state.  Call from
  *	main loop, synchronized to system tic / frame timer.
- *	@return RAYTIC_e bitfield:<br>
- *	RAYTIC_MOVED     movement occurred (screen contents likely changed, needing an update)<br>
- *	RAYTIC_COLLISION movement truncated by wall (maybe play a sound)
+ *	@return GRPHTIC_e bitfield:<br>
+ *	GRPHTIC_MOVED     movement occurred (screen contents likely changed, needing an update)<br>
+ *	GRPHTIC_COLLISION movement truncated by wall (maybe play a sound)
  */
 int doGameTic(GrphContext_t* ctx) {
-	float moveX = 0, moveY = 0;
+	float moveX = 0.0f, moveY = 0.0f, moveZ = 0.0f;
 	float angsin, angcos;
 	bool moveFlag = false, collisionFlag = false;
 
@@ -115,7 +141,8 @@ int doGameTic(GrphContext_t* ctx) {
 	}
 	if (ctx->controls[GRPHCTRL_TURNLEFT]) {
 		ctx->camA += GRPH_ANGLESTEP;
-		moveFlag = true;	}
+		moveFlag = true;
+	}
 	if (ctx->controls[GRPHCTRL_TURNRIGHT]) {
 		ctx->camA -= GRPH_ANGLESTEP;
 		moveFlag = true;
@@ -130,11 +157,19 @@ int doGameTic(GrphContext_t* ctx) {
 		moveY -= GRPH_MOVESTEP * angcos;
 		moveFlag = true;
 	}
+	if (ctx->controls[GRPHCTRL_FLYUP]) {
+		moveZ += GRPH_MOVESTEP;
+		moveFlag = true;
+	}
+	if (ctx->controls[GRPHCTRL_FLYDOWN]) {
+		moveZ -= GRPH_MOVESTEP;
+		moveFlag = true;
+	}
 	if (ctx->camA < 0) ctx->camA += 2 * M_PI;
 	if (ctx->camA >= 2 * M_PI) ctx->camA -= 2 * M_PI;
 	if (moveFlag) {
 		//collisionFlag = collisionDetect(ctx, moveX, moveY);
-		ctx->camX += moveX; ctx->camY += moveY;
+		ctx->camX += moveX; ctx->camY += moveY; ctx->camZ += moveZ;
 		render(ctx);
 	}
 
@@ -153,16 +188,17 @@ int doGameTic(GrphContext_t* ctx) {
  * @return true if there was a collision
  */
 bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY) {
-	float checkX[4], checkY[4];
-	int pointNum[4];
-	float changedX, changedY;
-	int blockX, blockY;
-	int corners = 0;
-	int index;
+//	float checkX[4], checkY[4];
+//	int pointNum[4];
+//	float changedX, changedY;
+//	int blockX, blockY;
+//	int corners = 0;
+//	int index;
 
-	if (ctx == NULL || ctx->world == NULL)
+	if (ctx == NULL || ctx->sectors == NULL)
 		return false;
 
+/*
 	changedX = ctx->camX + moveX; changedY = ctx->camY + moveY;
 	//	Check if the move is even on the map
 	if (changedX < 1 || changedY < 1 || changedX >= (ctx->mapW - 1)
@@ -298,6 +334,7 @@ bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY) {
 		break;
 	}
 	ctx->camX += moveX; ctx->camY += moveY;
+*/
 
 	return true;
 }
@@ -307,7 +344,8 @@ bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY) {
  * into column colors and heights (columns, colColors).
  */
 void render(GrphContext_t* ctx) {
-	int i, x;
+	int i, idx, list = GRPH_COLUMNS, recursion, x;
+	int prevTop, prevBot;
 	float angsin, angcos;
 	Vertex delta;
 	Sector_t* curSec;
@@ -317,24 +355,20 @@ void render(GrphContext_t* ctx) {
 		return;
 
 	//	Clear framebuffer
-	for (x = 0; x < GRPH_COLUMNS; x++) {
-		ctx->colColors[x] = 0;
-		ctx->columns[x] = 0;
-	}
+	memset((void*)&ctx->cols, 0, sizeof(ctx->cols));
 
 	//	View plane is defined by vector; rotate to view angle (note angle is clockwise from +x axis)
 	angsin = sinf(ctx->camA); angcos = cosf(ctx->camA);
 	intr.orig.x = ctx->camX; intr.orig.y = ctx->camY;
 	intr.dist = 1; intr.frac = 0;
 	//	Each column vector is related to the previous by a linear change:
-	intr.dir.x = angcos - angsin * GRPH_FOVMULT;
-	intr.dir.y = angsin + angcos * GRPH_FOVMULT;
-	delta.x = angsin *  2.0f * GRPH_COLSTEP;
-	delta.y = angcos * -2.0f * GRPH_COLSTEP;
+	intr.dir.x = angcos - angsin * GRPH_FOVMULT; intr.dir.y = angsin + angcos * GRPH_FOVMULT;
+	delta.x = angsin *  GRPH_COLSTEP; delta.y = angcos * -GRPH_COLSTEP;
 
 //	printf("orig.x: %e, orig.y: %e\n", intr.orig.x, intr.orig.y);
 
 	for (x = 0; x < GRPH_COLUMNS; x++) {
+		idx = x;
 
 //		if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
 //			printf("col.x: %e, col.y: %e\n", intr.dir.x, intr.dir.y);
@@ -342,28 +376,62 @@ void render(GrphContext_t* ctx) {
 		//	For each display column, loop over sides of the sector...
 		curSec = &ctx->sectors[ctx->currentSectorId];
 		intr.lineEnd.x = curSec->start.x; intr.lineEnd.y = curSec->start.y;
+		prevTop = 0, prevBot = GRPH_ROWS;
 
-		for (i = 0; i < curSec->sides; i++) {
-			//	Check lines in current sector for an intersection...
-			intr.lineStart.x = intr.lineEnd.x; intr.lineStart.y = intr.lineEnd.y;
-			intr.lineEnd.x = curSec->side[i].to.x;
-			intr.lineEnd.y = curSec->side[i].to.y;
-			bool f = intersect(&intr);
-//			if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
-//				printf("side %i, intr side: %e, frac: %e, dist: %e\n", i, intr.side, intr.frac, intr.dist);
-			if (f && intr.side > 0 && intr.dist > 0 && intr.frac >= 0 && intr.frac < 1) {
-				//	Hit a side, plot it
-				ctx->colColors[x] = curSec->side[i].wallId;
-				if ((intr.lineEnd.y - intr.lineStart.y) * (intr.lineEnd.x - intr.lineStart.x) > 0)
-					ctx->colColors[x] += 8;
-				ctx->columns[x] = GRPH_HEIGHT / intr.dist;
+		for (recursion = 0; recursion < GRPH_MAX_RECURSION; recursion++) {
+
+			for (i = 0; i < curSec->sides; i++) {
+				//	Check lines in current sector for an intersection...
+				intr.lineStart.x = intr.lineEnd.x; intr.lineStart.y = intr.lineEnd.y;
+				intr.lineEnd.x = curSec->side[i].to.x;
+				intr.lineEnd.y = curSec->side[i].to.y;
+				bool f = intersect(&intr);
+//				if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
+//					printf("side %i, intr side: %e, frac: %e, dist: %e\n", i, intr.side, intr.frac, intr.dist);
+				if (f && intr.side > 0 && intr.dist > 0 && intr.frac >= 0 && intr.frac < 1)
+					break;
+			}
+			if (i < curSec->sides) {
+				//	Hit a side; what type?
+				int id = curSec->side[i].sectorId;
+				float recipDist = GRPH_ROWS * GRPH_HEIGHT / intr.dist;
+				ctx->cols[idx].top = GRPH_HALFROWS - (int)((curSec->ceilHeight - ctx->camZ) * recipDist + 0.5);
+				ctx->cols[idx].bot = GRPH_HALFROWS - (int)((curSec->floorHeight - ctx->camZ) * recipDist + 0.5);
+				ctx->cols[idx].ceilId = curSec->ceilId;
+				ctx->cols[idx].floorId = curSec->floorId;
+				if (id == -1) {
+					//	one-sided: plot wall
+					if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
+						printf("side %i\n", i);
+					ctx->cols[idx].wallId = curSec->side[i].wallId;
+					if ((intr.lineEnd.y - intr.lineStart.y) * (intr.lineEnd.x - intr.lineStart.x) > 0)
+						ctx->cols[idx].wallId += 8;
+					ctx->cols[idx].frac = intr.frac;
+					ctx->cols[idx].next = 0;
+					break;
+				} else {
+					//	two-sided: advance to next sector and proceed recursively
+					prevTop = ctx->cols[idx].top; prevBot = ctx->cols[idx].bot;
+
+//					if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
+//						printf("going to sector %i\n", id);
+					//	checking bogus values; should recalculate from map data, but in the mean time, just clamp to a safe value
+					if (id < 0) id = 0;
+					if (id >= ctx->sectorMax) id = ctx->sectorMax - 1;
+					curSec = &ctx->sectors[id];
+					intr.lineEnd.x = curSec->start.x; intr.lineEnd.y = curSec->start.y;
+				}
+			} else {
+//				if (x >= GRPH_COLUMNS / 2 - 1 && x <= GRPH_COLUMNS / 2 + 1)
+//					printf("no candidate intersections!\n");
 				break;
 			}
+
 		}
 
 		intr.dir.x += delta.x; intr.dir.y += delta.y;
 	}
-//	printf("\n");
+	printf("\n");
 
 }
 
@@ -391,61 +459,4 @@ bool intersect(Intersect_t* intr) {
 	//if (normsq != 0) intr->side = intr->side / normsq;
 
 	return true;
-}
-
-/**
- *	Cast a ray across the map
- */
-void rayCast(GrphContext_t* ctx, GrphRay_t* ray) {
-	int blockX, blockY, magnitude;
-	int dirX, dirY, i;
-
-	if (ctx == NULL || ray == NULL || ctx->world == NULL)
-		return;
-
-	blockX = (int)ray->posX; blockY = (int)ray->posY;
-	ray->colr = 0; ray->travel = 0;
-	//	Normalization, if desired (defeats perspective here)
-	//magnitude = sqrt(ray->slopeX * ray->slopeX + ray->slopeY * ray->slopeY);
-	magnitude = 1;
-	//	Amount traveled to the next axis intersection
-	float travelX = magnitude / fabs(ray->slopeX);
-	float travelY = magnitude / fabs(ray->slopeY);
-	//	Distance to the first intersection (and each thereafter)
-	float tIntV, tIntH;
-	if (ray->slopeX > 0) {
-		dirX = 1;
-		tIntV = (1 - ray->posX + blockX) * travelX;
-	} else {
-		dirX = -1;
-		tIntV = (ray->posX - blockX) * travelX;
-	}
-	if (ray->slopeY > 0) {
-		dirY = 1;
-		tIntH = (1 - ray->posY + blockY) * travelY;
-	} else {
-		dirY = -1;
-		tIntH = (ray->posY - blockY) * travelY;
-	}
-	i = 0;
-	do {
-		if (tIntH < tIntV) {
-			ray->travel = tIntH;
-			blockY += dirY;
-			tIntH += travelY;
-			ray->wallHoriz = true;
-		} else {
-			ray->travel = tIntV;
-			blockX += dirX;
-			tIntV += travelX;
-			ray->wallHoriz = false;
-		}
-		i++;
-		if (blockX < 0 || blockY < 0 || blockX >= ctx->mapW || blockY >= ctx->mapH) {
-			//	Out of bounds?
-			break;
-		}
-		ray->colr = ctx->world[blockX + blockY * ctx->mapW];
-	} while (i < 100 && ray->colr == 0);
-
 }

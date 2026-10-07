@@ -11,8 +11,6 @@
 /* * * Defines * * */
 
 /** Window and drawing dimensions */
-#define HEIGHT			640
-#define HALF_HEIGHT		(HEIGHT / 2)
 #define STRIP_WIDTH		3
 #define WIDTH			(GRPH_COLUMNS * STRIP_WIDTH)
 
@@ -29,9 +27,7 @@ HWND hMainWindow;
 ULONG_PTR hTimer;
 
 /** Color palette to draw everything in */
-ARGB drawCeiling = Color_LightGray;
-ARGB drawFloor = Color_DarkGray;
-ARGB drawWalls[] = {
+ARGB drawPalette[] = {
 	Color_Black,
 	Color_DarkBlue,
 	Color_DarkGreen,
@@ -54,9 +50,9 @@ GrphContext_t gc = {
 	camX: -0.5f,
 	camY: -0.25f,
 	camA: 0.0f * M_PI,
-	mapW: 0,
-	mapH: 0,
-	world: NULL
+	sectors: sectors,
+	sectorMax: 2,
+	currentSectorId: 0
 };
 
 
@@ -98,9 +94,6 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 //		}
 //		return 1;
 //	}
-//	gc.world = (int[]){};
-	gc.sectors = sectors;
-	gc.currentSectorId = 0;
 
 	/* * *  Deal with all the Windows crap  * * */
 
@@ -141,7 +134,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 			CW_USEDEFAULT,	//	Windows decides position where..
 			CW_USEDEFAULT,	//	..the window ends up on the screen
 			WIDTH,        	//	Window's width..
-			HEIGHT,       	//	..and height in px
+			GRPH_ROWS,    	//	..and height in px
 			HWND_DESKTOP, 	//	Is child to desktop
 			NULL,         	//	No menu
 			hThisInstance,	//	Application instance
@@ -227,12 +220,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
  *	Draws graphical output to the window.
  */
 BOOL OnPaint(void) {
-	int x;
-	int st;
+	int h, id, st, x;
+	int prevTop, prevBot;
 	HDC hdc;
 	PAINTSTRUCT ps;
 	GpGraphics *g;
-	GpSolidFill *c, *f, *w;
+	GpSolidFill *f;
+	DrawCol_t* col;
 
 	if (!(hdc = BeginPaint(hMainWindow, &ps))) {
 		EndPaint(hMainWindow, &ps);
@@ -240,22 +234,38 @@ BOOL OnPaint(void) {
 	}
 
 	st = GdipCreateFromHDC(hdc, &g);
-	st = GdipCreateSolidFill(drawCeiling, &c);
-	st = GdipCreateSolidFill(drawFloor, &f);
-	st = GdipCreateSolidFill(drawCeiling, &w);
+	st |= GdipCreateSolidFill(drawPalette[0], &f);
 
 	for (x = 0; x < GRPH_COLUMNS; x++) {
-		int rc = (int)(gc.columns[x] * HALF_HEIGHT);
-		st = GdipSetSolidFillColor(w, drawWalls[gc.colColors[x]]);
-		st = GdipFillRectangleI(g, c, x * STRIP_WIDTH, 0,
-					STRIP_WIDTH, HALF_HEIGHT - rc);
-		st = GdipFillRectangleI(g, w, x * STRIP_WIDTH, HALF_HEIGHT - rc,
-					STRIP_WIDTH, rc * 2);
-		st = GdipFillRectangleI(g, f, x * STRIP_WIDTH, HALF_HEIGHT + rc,
-					STRIP_WIDTH, HALF_HEIGHT - rc);
+		col = &gc.cols[x];
+		prevTop = 0; prevBot = GRPH_ROWS;
+
+		do {
+			if (col->top - prevTop > 0)
+				st |= GdipSetSolidFillColor(f, drawPalette[col->ceilId]);
+				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, prevTop, STRIP_WIDTH, col->top - prevTop);
+
+			if (col->bot - prevBot > 0) {
+				st |= GdipSetSolidFillColor(f, drawPalette[col->floorId]);				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, col->bot, STRIP_WIDTH, col->bot - prevBot);
+			}
+
+			id = col->next;
+			if (id == 0) {
+				if (col->bot - col->top > 0) {
+					st |= GdipSetSolidFillColor(f, drawPalette[col->WallId]);
+					st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, col->top, STRIP_WIDTH, col->bot - col->top);
+				}
+			} else {
+				prevTop = col->top; prevBot = col->bot;
+				if (id < 0) id = 0;
+				if (id >= numelem(gc.cols)) id = numelem(gc.cols) - 1;
+				col = &gc.cols[id];
+			}
+		} while (id != 0);
 	}
-	st = GdipDeleteGraphics(g);
+	st |= GdipDeleteGraphics(g);
 	(void)st;
+	if (st) printf("some GDI+ errors; st = %i\n", st);
 	EndPaint(hMainWindow, &ps);
 
 	return true;
@@ -287,6 +297,12 @@ void setKeyState(int key, bool pressed) {
 	case 'D':
 		k = GRPHCTRL_STRAFERIGHT;
 		break;
+	case 'F':
+		k = GRPHCTRL_FLYUP;
+		break;
+	case 'C':
+		k = GRPHCTRL_FLYDOWN;
+		break;
 	case VK_ESCAPE:
 		SendMessage(hMainWindow, WM_DESTROY, 0, 0);
 		return;
@@ -310,7 +326,8 @@ void setKeyState(int key, bool pressed) {
  *	               -3: No player start location
  */
 int loadMap(const char* f) {
-	int err = 0, scanlen, tokens, x, y, col;
+	int err = 0;
+//	int err = 0, scanlen, tokens, x, y, col;
 	HANDLE hFile = INVALID_HANDLE_VALUE;
 	DWORD bytesRead;
 	LARGE_INTEGER fLen;
@@ -371,6 +388,7 @@ int loadMap(const char* f) {
 		err = cursor;
 		goto loadFileError;
 	}
+/*
 	//	capture tokens
 	tokens = sscanf(&mapbuf[cursor], "%d %d%n",
 				&gc.mapW,
@@ -424,7 +442,7 @@ int loadMap(const char* f) {
 		err = -3;
 		goto loadFileError;
 	}
-
+*/
 	err = 0;
 
 loadFileError:
@@ -432,9 +450,9 @@ loadFileError:
 		CloseHandle(hFile);
 	if (mapbuf != NULL)
 		HeapFree(GetProcessHeap(), 0, mapbuf);
-	if (err != 0 && gc.world != NULL) {
-		HeapFree(GetProcessHeap(), 0, gc.world);
-		gc.world = NULL;
+	if (err != 0 && gc.sectors != NULL) {
+		HeapFree(GetProcessHeap(), 0, gc.sectors);
+		gc.sectors = NULL;
 	}
 	return err;
 }
