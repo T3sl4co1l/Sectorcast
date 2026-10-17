@@ -1,8 +1,8 @@
 #ifndef SECTORS_H_INCLUDED
 #define SECTORS_H_INCLUDED
 
-#include <stdbool.h>
 #include <stdint.h>
+#include "common.h"
 
 
 /* * * Configuration Defines * * */
@@ -31,6 +31,7 @@
 /** Extra columns in GrphContext_t.cols for recursive chaining */
 #define GRPH_RECBUF   	GRPH_COLUMNS
 
+
 /* * * Type Declarations * * */
 
 /** Named indices of GrphContext_t.controls[] */
@@ -56,16 +57,15 @@ typedef int TextureId;
 
 typedef int PaletteId;
 
-typedef struct Vertex_s {
+typedef struct Vec2_s {
 	float x;
 	float y;
-} Vertex;
+} Vec2;
 
 typedef struct Side_s {
 	int sectorId;	/**< Backside sector, or -1 if single-sided    */
-//	int sectorSide; /**< If backside sector specified, portal to this Side of that Sector; otherwise ignored */
 	int wallId;  	/**< Front-side wall descriptor (as ID)        */
-	Vertex to;   	/**< Side is drawn from previous point to here */
+	Vec2 to;   	/**< Side is drawn from previous point to here */
 } Side;
 
 typedef struct __attribute__((aligned(4))) SectorFileHeader_s {
@@ -89,47 +89,49 @@ typedef struct Sector_s {
 	int id;           	/**< Sector ID; index into map file's object allocation table, or -1 if invalid/unallocated */
 	int sides;        	/**< Size of flexible member (number of elements) */
 	PaletteId pal;    	/**< Room palette (as ID) */
-	float ceilHeight; 	/**< Ceiling and...  */
-	float floorHeight;	/**< ...floor height */
-	TextureId ceilId; 	/**< Ceiling and...  */
-	TextureId floorId;	/**< ...floor texture (as ID) */
-	Vertex start;     	/**< Starting vertex (for quick access; same as last element of sides[]) */
-	Side side[8];     	/**< List of sides (fixed length for now) */
+	float ceilHeight; 	/**< Ceiling height */
+	float floorHeight;	/**< Floor height   */
+	TextureId ceilId; 	/**< Ceiling texture (as ID) */
+	TextureId floorId;	/**< Floor texture (as ID)   */
+	Vec2 start;     	/**< Starting vertex (for quick access; same as last element of sides[]) */
+	Side side[8];     	/**< List of sides (static length for now) */
 } Sector_t;
 
 /** Data container for intersect() */
 typedef struct Intersect_s {
-	Vertex lineStart;	/**< (in) Start point of line to test */
-	Vertex lineEnd;  	/**< (in) End point of line to test */
-	Vertex orig;     	/**< (in) Ray origin */
-	Vertex dir;      	/**< (in) Ray direction (or end point of line being tested against) */
-	float frac;      	/**< (out) Fraction along the line at which the ray intersects (< 0, >= 1: missed line segment) */
-	float side;      	/**< (out) Closest distance from line to origin (> 0: on front side of line; == 0: exactly on line) */
-	float dist;      	/**< (out) Distance from ray origin to intersection (multiples of dir) */
+	Vec2 start; 	/**< (in) Start point of line to test */
+	Vec2 end;   	/**< (in) End point of line to test   */
+	Vec2 orig;  	/**< (in) Ray origin */
+	Vec2 dir;   	/**< (in) Ray direction/slope (or displacement to end point of line being tested with) */
+	float frac; 	/**< (out) Fraction along the line at which the ray intersects (< 0, >= 1: missed line segment) */
+	float side; 	/**< (out) Closest distance from line to origin (> 0: on front side of line; == 0: exactly on line) */
+	float dist; 	/**< (out) Distance from ray origin to intersection (as multiples of dir) */
 } Intersect_t;
 
 /** Graphical data in a single display column */
 typedef struct DrawCol_s {
-	int top;	/**< Upper wall (ceiling edge) screen coordinate */
-	int bot;	/**< Lower wall (floor edge) screen coordinate   */
-	TextureId ceilId; 	/**< Ceiling and...  */
-	TextureId floorId;	/**< ...floor texture (as ID) */
-	TextureId wallId;	/**< Wall texture (as ID); mid if next == 0, else upper and lower */
-	int frac;	/**< line intersection (u coordinate) */
-	int next;	/**< Index to next DrawCol (linked list) (draws upper and lower), or 0 (was a single-sided wall) */
+	int to;      	/**< Screen coordinate to draw to (starting from upper screen edge or end of proceeding element) */
+	TextureId id;	/**< Solid color or ceiling/wall texture */
+//	int u;       	/**< Texture x-coordinate (if id references a texture, else unused) */
+//	int v;       	/**< Texture initial y-coordinate (if id references a texture, else unused) */
+//	int vSlope;  	/**< Texture y-scale (if id references a texture, else unused) */
+	int next;    	/**< Index to next DrawCol (linked list) */
 } DrawCol_t;
 
 /** Fields of Sectors (pseudo)class */
 typedef struct GraphicsContext_s {
+	bool controls[GRPHCTRL_MAXKEY + 1];	/**< (in) Control inputs  */
 	float camA; 	/**< (in) Camera angle (radians) */
 	float camX; 	/**< (in) Camera x coordinate    */
 	float camY; 	/**< (in) Camera y coordinate    */
 	float camZ; 	/**< (in) Camera z coordinate    */
+	int clearId;	/**< (in) Background color (as ID) to clear screen with */
 	Sector_t* sectors;  	/**< (in) Pointer to sector list */
 	int sectorMax;      	/**< (in) Sector list length (indices 0 to sectorMax-1) */
 	int currentSectorId;	/**< (in/out) Sector the camera is in */
-	bool controls[GRPHCTRL_MAXKEY + 1];	/**< (in) Control inputs  */
-	DrawCol_t cols[GRPH_COLUMNS + GRPH_RECBUF];	/**< (out) Display columns */
+	int colsLen;	/**< (out) Used length of, or next free slot index in, cols[] */
+	int maxColsLen; /**< (out) Optional debug stat, records runtime maximum colsLen */
+	DrawCol_t cols[2 * (GRPH_COLUMNS + GRPH_RECBUF)]; 	/**< (out) Display columns */
 } GrphContext_t;
 
 

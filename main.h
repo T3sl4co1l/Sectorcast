@@ -2,9 +2,7 @@
 #define MAIN_H_INCLUDED
 
 #include <windows.h>
-#include <stdbool.h>
-
-#define numelem(x)			( sizeof(x) / sizeof(x[0]) )
+#include "common.h"
 
 BOOL OnPaint(void);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);

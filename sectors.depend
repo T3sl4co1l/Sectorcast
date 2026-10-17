@@ -1,16 +1,16 @@
 # depslib dependency file v1.0
-1791071007 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
+1792237766 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
 	<stddef.h>
 	<stdio.h>
 	<string.h>
 	<math.h>
 	"sectors.h"
 
-1791070904 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
-	<stdbool.h>
+1792235731 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
 	<stdint.h>
+	"common.h"
 
-1790811671 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
+1792237474 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
 	"main.h"
 	<stdio.h>
 	<stdlib.h>
@@ -20,10 +20,13 @@
 	"gdi_colors.h"
 	"sectors.h"
 
-1789425246 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.h
+1791714440 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.h
 	<windows.h>
-	<stdbool.h>
+	"common.h"
 
 1789116118 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\gdi_colors.h
 	<gdiplus.h>
+
+1792237831 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\common.h
+	<stdbool.h>
 

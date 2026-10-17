@@ -49,7 +49,9 @@ ARGB drawPalette[] = {
 GrphContext_t gc = {
 	camX: -0.5f,
 	camY: -0.25f,
+	camZ: 0.0f,
 	camA: 0.0f * M_PI,
+	clearId: 0,
 	sectors: sectors,
 	sectorMax: 2,
 	currentSectorId: 0
@@ -70,7 +72,9 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 	/* * *  Initialization and loading  * * */
 
-	printf("Sectorcast: flat shaded, lines, sectors and portals engine\nBy Tim Williams, " __DATE__ "\n");
+	printf("Sectorcast " VERSION_STRING "\n"
+	       "Flat shaded, lines, sectors and portals engine\n"
+	       "By Tim Williams, " __DATE__ "\n");
 	if (!strlen(lpszArgument)) {
 		printf("\nUsage: SECTORS <mapname>\n");
 		return 0;
@@ -220,8 +224,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
  *	Draws graphical output to the window.
  */
 BOOL OnPaint(void) {
-	int h, id, st, x;
-	int prevTop, prevBot;
+	int id, len, next, prevTo, st, x;
 	HDC hdc;
 	PAINTSTRUCT ps;
 	GpGraphics *g;
@@ -232,37 +235,28 @@ BOOL OnPaint(void) {
 		EndPaint(hMainWindow, &ps);
 		return false;
 	}
-
 	st = GdipCreateFromHDC(hdc, &g);
 	st |= GdipCreateSolidFill(drawPalette[0], &f);
 
 	for (x = 0; x < GRPH_COLUMNS; x++) {
-		col = &gc.cols[x];
-		prevTop = 0; prevBot = GRPH_ROWS;
-
+		//	each column starts from its respective index in .cols;
+		//	these are ceilings/upper walls
+		next = x; prevTo = 0;
 		do {
-			if (col->top - prevTop > 0)
-				st |= GdipSetSolidFillColor(f, drawPalette[col->ceilId]);
-				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, prevTop, STRIP_WIDTH, col->top - prevTop);
-
-			if (col->bot - prevBot > 0) {
-				st |= GdipSetSolidFillColor(f, drawPalette[col->floorId]);				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, col->bot, STRIP_WIDTH, col->bot - prevBot);
+			col = &gc.cols[next];
+			len = col->to - prevTo;
+			if (len > 0) {
+				if (len > GRPH_ROWS - prevTo) len = GRPH_ROWS - prevTo;
+				id = col->id;
+				if (id < 0 || id > numelem(drawPalette)) id = 0;
+				st |= GdipSetSolidFillColor(f, drawPalette[id]);
+				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, prevTo, STRIP_WIDTH, len);
 			}
-
-			id = col->next;
-			if (id == 0) {
-				if (col->bot - col->top > 0) {
-					st |= GdipSetSolidFillColor(f, drawPalette[col->WallId]);
-					st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, col->top, STRIP_WIDTH, col->bot - col->top);
-				}
-			} else {
-				prevTop = col->top; prevBot = col->bot;
-				if (id < 0) id = 0;
-				if (id >= numelem(gc.cols)) id = numelem(gc.cols) - 1;
-				col = &gc.cols[id];
-			}
-		} while (id != 0);
+			next = col->next; prevTo += len;
+			if (next < 0 || next >= numelem(gc.cols)) next = 0;
+		} while (next != 0 && prevTo < GRPH_ROWS);
 	}
+
 	st |= GdipDeleteGraphics(g);
 	(void)st;
 	if (st) printf("some GDI+ errors; st = %i\n", st);
