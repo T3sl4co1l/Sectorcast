@@ -26,10 +26,10 @@
 #define GRPH_FOVMULT  	1.0f
 /** Display-column vector increment */
 #define GRPH_COLSTEP  	(2.0f * GRPH_FOVMULT / GRPH_COLUMNS)
-/** Maximum number of sectors to raycast through */
+/** Maximum number of sectors to portal through */
 #define GRPH_MAX_RECURSION	20
 /** Extra columns in GrphContext_t.cols for recursive chaining */
-#define GRPH_RECBUF   	GRPH_COLUMNS
+#define GRPH_RECBUF   	GRPH_COLUMNS * 7
 
 
 /* * * Type Declarations * * */
@@ -97,6 +97,13 @@ typedef struct Sector_s {
 	Side side[8];     	/**< List of sides (static length for now) */
 } Sector_t;
 
+/** Container for render() queue entries */
+typedef struct RenderQueue_s {
+	Sector_t* sector;
+	int colStart;
+	int colEnd;
+} RenderQueue;
+
 /** Data container for intersect() */
 typedef struct Intersect_s {
 	Vec2 start; 	/**< (in) Start point of line to test */
@@ -107,6 +114,19 @@ typedef struct Intersect_s {
 	float side; 	/**< (out) Closest distance from line to origin (> 0: on front side of line; == 0: exactly on line) */
 	float dist; 	/**< (out) Distance from ray origin to intersection (as multiples of dir) */
 } Intersect_t;
+
+/** Data container for drawQuads() */
+typedef struct DrawDescriptor_s {
+	float startDist;	/**< Perspective-corrected map distance to start (left) vertex */
+	float endDist;  	/**< Perspective-corrected map distance to end (right) vertex  */
+	int spanStart;  	/**< Column to start drawing on (spanStart &lt;= x &lt; spanEnd) */
+	int spanEnd;    	/**< Column to stop drawing at (spanStart &lt;= x &lt; spanEnd) */
+	TextureId upper;	/**< Ceiling / upper wall texture (as ID) */
+	TextureId lower;	/**< Floor / lower wall texture (as ID) */
+	Sector_t* sec;  	/**< Sector to read ceil/floor/wall parameters from */
+	int insert[GRPH_COLUMNS]; 	/**< Indices in ctx-&gt;cols[] of insertion point in this column's linked list */
+	int ceilTos[GRPH_COLUMNS];	/**< Previous value of ceilTo for this column; since we can't (easily) go back one in the ctx-&gt;cols[] linked list */
+} DrawDescriptor;
 
 /** Graphical data in a single display column */
 typedef struct DrawCol_s {
@@ -131,7 +151,7 @@ typedef struct GraphicsContext_s {
 	int currentSectorId;	/**< (in/out) Sector the camera is in */
 	int colsLen;	/**< (out) Used length of, or next free slot index in, cols[] */
 	int maxColsLen; /**< (out) Optional debug stat, records runtime maximum colsLen */
-	DrawCol_t cols[2 * (GRPH_COLUMNS + GRPH_RECBUF)]; 	/**< (out) Display columns */
+	DrawCol_t cols[GRPH_COLUMNS + GRPH_RECBUF];	/**< (out) Display column linked lists; indices 0 <= i < RPH_COLUMNS are first elements of respective list */
 } GrphContext_t;
 
 
@@ -141,7 +161,8 @@ extern Sector_t sectors[];
 
 int doGameTic(GrphContext_t* ctx);
 bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY);
-bool intersect(Intersect_t* intr);
 void render(GrphContext_t* ctx);
+bool intersect(Intersect_t* intr);
+bool drawQuads(GrphContext_t* ctx, DrawDescriptor* dd);
 
 #endif // SECTORS_H_INCLUDED

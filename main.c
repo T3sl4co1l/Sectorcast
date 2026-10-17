@@ -211,6 +211,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_DESTROY:
 		KillTimer(hwnd, hTimer);
 		GdiplusShutdown(gdiplusToken);
+		printf("Max cols used: %i\n", gc.maxColsLen);
 		PostQuitMessage(0);
 		break;
 	default:

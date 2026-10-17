@@ -1,16 +1,16 @@
 # depslib dependency file v1.0
-1792237766 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
+1792243343 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
 	<stddef.h>
 	<stdio.h>
 	<string.h>
 	<math.h>
 	"sectors.h"
 
-1792235731 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
+1792244814 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
 	<stdint.h>
 	"common.h"
 
-1792237474 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
+1792243343 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
 	"main.h"
 	<stdio.h>
 	<stdlib.h>
