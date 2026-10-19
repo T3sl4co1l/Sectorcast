@@ -5,6 +5,8 @@
 #include <tchar.h>
 #include <gdiplus/gdiplus.h>
 #include "gdi_colors.h"
+#include "common.h"
+#include "game.h"
 #include "sectors.h"
 
 
@@ -19,11 +21,11 @@
 
 /** Class name */
 TCHAR szClassName[] = _T("SectorcastWndCls");
-/**	GDI+ token for unloading */
+/** GDI+ token for unloading */
 ULONG_PTR gdiplusToken;
 /** Handle for main window */
 HWND hMainWindow;
-/**	Timer handle / ID */
+/** Timer handle / ID */
 ULONG_PTR hTimer;
 
 /** Color palette to draw everything in */
@@ -46,15 +48,28 @@ ARGB drawPalette[] = {
 	Color_White
 };
 
-GrphContext_t gc = {
-	camX: -0.5f,
-	camY: -0.25f,
-	camZ: 0.0f,
-	camA: 0.0f * M_PI,
-	clearId: 0,
-	sectors: sectors,
-	sectorMax: 2,
-	currentSectorId: 0
+GameContext game = {
+	player: {
+		a: 0.0f * M_PI,
+		x: -0.5f,
+		y: -0.25f,
+		z: 0.0f,
+		secId: 0
+	},
+	grph: {
+		cam: {
+			a: 0.0f * M_PI,
+			x: -0.5f,
+			y: -0.25f,
+			z: 0.0f,
+			secId: 0
+		},
+		clearId: 0
+	},
+	wrl: {
+		sectorsLen: 2,
+		sectors: sectors
+	}
 };
 
 
@@ -149,13 +164,14 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		return 3;
 	}
 
-	hTimer = SetTimer(hMainWindow, 1, 1000 / GRPH_FRAMERATE, NULL);
+	hTimer = SetTimer(hMainWindow, 1, 1000 / GAME_FRAMERATE, NULL);
 	if (!hTimer) {
 		printf("SetTimer failed with error 0x%lx.\n", GetLastError());
 		return 4;
 	}
 
-	render(&gc);
+	doGameTic(&game);	//	prepare graphics context
+	render(&game);	//	and render it for the first time
 
 	//	Make the window visible on the screen
 	ShowWindow(hMainWindow, nCmdShow);
@@ -185,11 +201,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			if (!__atomic_exchange_n(&inGameTic, true, __ATOMIC_ACQUIRE)) {
 
 				//	Handle timer tic
-				int ticFlags = doGameTic(&gc);
-				if (ticFlags & GRPHTIC_MOVED)
+				int ticFlags = doGameTic(&game);
+				if (ticFlags & GAMETIC_MOVED) {
+					render(&game);
 					RedrawWindow(hMainWindow, NULL, NULL, RDW_INVALIDATE);
-
-				if (ticFlags & GRPHTIC_COLLISION)
+				}
+				if (ticFlags & GAMETIC_COLLISION)
 					MessageBeep(MB_ICONEXCLAMATION);	//	Hit something, play a sound
 
 				__atomic_store_n(&inGameTic, false, __ATOMIC_RELEASE);
@@ -211,7 +228,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	case WM_DESTROY:
 		KillTimer(hwnd, hTimer);
 		GdiplusShutdown(gdiplusToken);
-		printf("Max cols used: %i\n", gc.maxColsLen);
+		printf("Max cols used: %i\n", game.grph.maxColsLen);
 		PostQuitMessage(0);
 		break;
 	default:
@@ -230,7 +247,7 @@ BOOL OnPaint(void) {
 	PAINTSTRUCT ps;
 	GpGraphics *g;
 	GpSolidFill *f;
-	DrawCol_t* col;
+	DrawCol* col;
 
 	if (!(hdc = BeginPaint(hMainWindow, &ps))) {
 		EndPaint(hMainWindow, &ps);
@@ -244,7 +261,7 @@ BOOL OnPaint(void) {
 		//	these are ceilings/upper walls
 		next = x; prevTo = 0;
 		do {
-			col = &gc.cols[next];
+			col = &game.grph.cols[next];
 			len = col->to - prevTo;
 			if (len > 0) {
 				if (len > GRPH_ROWS - prevTo) len = GRPH_ROWS - prevTo;
@@ -254,7 +271,7 @@ BOOL OnPaint(void) {
 				st |= GdipFillRectangleI(g, f, x * STRIP_WIDTH, prevTo, STRIP_WIDTH, len);
 			}
 			next = col->next; prevTo += len;
-			if (next < 0 || next >= numelem(gc.cols)) next = 0;
+			if (next < 0 || next >= numelem(game.grph.cols)) next = 0;
 		} while (next != 0 && prevTo < GRPH_ROWS);
 	}
 
@@ -269,34 +286,34 @@ BOOL OnPaint(void) {
 /**
  *	Convert virtual key messages into control inputs.
  */
-void setKeyState(int key, bool pressed) {
+void setKeyState(int key, BOOL pressed) {
 	int k;
 
 	switch (key) {
 	case VK_UP:
 	case 'W':
-		k = GRPHCTRL_FWD;
+		k = GAMECTRL_FWD;
 		break;
 	case VK_DOWN:
 	case 'S':
-		k = GRPHCTRL_REV;
+		k = GAMECTRL_REV;
 		break;
 	case VK_LEFT:
-		k = GRPHCTRL_TURNLEFT;
+		k = GAMECTRL_TURNLEFT;
 		break;
 	case VK_RIGHT:
-		k = GRPHCTRL_TURNRIGHT;
+		k = GAMECTRL_TURNRIGHT;
 		break;	case 'A':
-		k = GRPHCTRL_STRAFELEFT;
+		k = GAMECTRL_STRAFELEFT;
 		break;
 	case 'D':
-		k = GRPHCTRL_STRAFERIGHT;
+		k = GAMECTRL_STRAFERIGHT;
 		break;
 	case 'F':
-		k = GRPHCTRL_FLYUP;
+		k = GAMECTRL_FLYUP;
 		break;
 	case 'C':
-		k = GRPHCTRL_FLYDOWN;
+		k = GAMECTRL_FLYDOWN;
 		break;
 	case VK_ESCAPE:
 		SendMessage(hMainWindow, WM_DESTROY, 0, 0);
@@ -304,7 +321,7 @@ void setKeyState(int key, bool pressed) {
 	default:
 		return;
 	}
-	gc.controls[k] = pressed;
+	game.controls[k] = pressed;
 
 }
 
@@ -445,9 +462,9 @@ loadFileError:
 		CloseHandle(hFile);
 	if (mapbuf != NULL)
 		HeapFree(GetProcessHeap(), 0, mapbuf);
-	if (err != 0 && gc.sectors != NULL) {
-		HeapFree(GetProcessHeap(), 0, gc.sectors);
-		gc.sectors = NULL;
+	if (err != 0 && game.wrl.sectors != NULL) {
+		HeapFree(GetProcessHeap(), 0, game.wrl.sectors);
+		game.wrl.sectors = NULL;
 	}
 	return err;
 }

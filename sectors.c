@@ -53,12 +53,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "common.h"
 #include "sectors.h"
 
 //#define ARITHMETIC_DEBUG
 
 
-Sector_t sectors[] = {
+Sector sectors[] = {
 	{
 		id: 0,
 		sides: 4,
@@ -100,11 +101,11 @@ Sector_t sectors[] = {
 			{
 				sectorId: -1,
 				wallId: 4,
-				to: { 2.0f, 0.75f }
+				to: { 4.0f, 3.0f }
 			}, {
 				sectorId: -1,
 				wallId: 5,
-				to: { 2.0f, -0.75f }
+				to: { 4.0f, -0.75f }
 			}, {
 				sectorId: -1,
 				wallId: 6,
@@ -119,234 +120,10 @@ Sector_t sectors[] = {
 };
 
 /**
- *	Processes inputs and updates game state.  Call from
- *	main loop, synchronized to system tic / frame timer.
- *	@return GRPHTIC_e bitfield:<br>
- *	GRPHTIC_MOVED     movement occurred (screen contents likely changed, needing an update)<br>
- *	GRPHTIC_COLLISION movement truncated by wall (maybe play a sound)
+ * Transforms current graphics context (sectors, camX/Y/Z/A..)
+ * into column colors and heights (cols).
  */
-int doGameTic(GrphContext_t* ctx) {
-	float moveX = 0.0f, moveY = 0.0f, moveZ = 0.0f;
-	float angsin, angcos;
-	bool moveFlag = false, collisionFlag = false;
-
-	angsin = sinf(ctx->camA); angcos = cosf(ctx->camA);
-
-	if (ctx->controls[GRPHCTRL_FWD]) {
-		moveX += GRPH_MOVESTEP * angcos;
-		moveY += GRPH_MOVESTEP * angsin;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_REV]) {
-		moveX -= GRPH_MOVESTEP * angcos;
-		moveY -= GRPH_MOVESTEP * angsin;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_TURNLEFT]) {
-		ctx->camA += GRPH_ANGLESTEP;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_TURNRIGHT]) {
-		ctx->camA -= GRPH_ANGLESTEP;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_STRAFELEFT]) {
-		moveX -= GRPH_MOVESTEP * angsin;
-		moveY += GRPH_MOVESTEP * angcos;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_STRAFERIGHT]) {
-		moveX += GRPH_MOVESTEP * angsin;
-		moveY -= GRPH_MOVESTEP * angcos;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_FLYUP]) {
-		moveZ += GRPH_MOVESTEP;
-		moveFlag = true;
-	}
-	if (ctx->controls[GRPHCTRL_FLYDOWN]) {
-		moveZ -= GRPH_MOVESTEP;
-		moveFlag = true;
-	}
-	if (ctx->camA < 0) ctx->camA += 2 * M_PI;
-	if (ctx->camA >= 2 * M_PI) ctx->camA -= 2 * M_PI;
-	if (moveFlag) {
-		//collisionFlag = collisionDetect(ctx, moveX, moveY);
-		ctx->camX += moveX; ctx->camY += moveY; ctx->camZ += moveZ;
-		render(ctx);
-	}
-
-	int r = 0;
-	if (moveFlag) r |= GRPHTIC_MOVED;
-	if (collisionFlag) r |= GRPHTIC_COLLISION;
-
-	return r;
-}
-
-/**
- * Checks if the specified move is allowable.  Automatically updates
- * camX, camY.
- * @param moveX Movement in X direction
- * @param moveY Movement in Y direction
- * @return true if there was a collision
- */
-bool collisionDetect(GrphContext_t* ctx, float moveX, float moveY) {
-//	float checkX[4], checkY[4];
-//	int pointNum[4];
-//	float changedX, changedY;
-//	int blockX, blockY;
-//	int corners = 0;
-//	int index;
-
-	if (ctx == NULL || ctx->sectors == NULL)
-		return false;
-
-/*
-	changedX = ctx->camX + moveX; changedY = ctx->camY + moveY;
-	//	Check if the move is even on the map
-	if (changedX < 1 || changedY < 1 || changedX >= (ctx->mapW - 1)
-			|| changedY >= (ctx->mapH - 1))
-		//	Out of bounds?  Hit the edge, don't move
-		return true;
-	//	Check for map collisions
-	//	Lower right corner of player
-	checkX[0] = changedX + GRPH_PLAYERSZ; checkY[0] = changedY + GRPH_PLAYERSZ;
-	//	lower left
-	checkX[1] = changedX - GRPH_PLAYERSZ; checkY[1] = changedY + GRPH_PLAYERSZ;
-	//	upper left
-	checkX[2] = changedX - GRPH_PLAYERSZ; checkY[2] = changedY - GRPH_PLAYERSZ;
-	//	upper right
-	checkX[3] = changedX + GRPH_PLAYERSZ; checkY[3] = changedY - GRPH_PLAYERSZ;
-	for (int i = 0; i < 4; i++) {
-		//	corners counts the number of points that are faulty:
-		//	0 = nothing, 1 = an outside corner, 2 = one side (or a
-		//	diagonal pinch), 3 = inside corner, 4 = trapped.
-		if (ctx->world[((int)checkX[i]) + ((int)checkY[i]) * ctx->mapW] > 0) {
-			pointNum[corners] = i;
-			corners++;
-		}
-	}
-	switch (corners) {
-	case 0:
-		//	No collisions, make the move
-		ctx->camX += moveX; ctx->camY += moveY;
-		return false;
-	case 1:
-		//	1 collision: an outside wall corner at pointNum[0].
-		blockX = (int)checkX[pointNum[0]];
-		blockY = (int)checkY[pointNum[0]];
-		switch (pointNum[0]) {
-		case 0:
-			//	Lower right corner of player is stuck
-			if (changedY > (blockY + changedX - blockX)) {
-				if (moveX > 0) moveX = 0;
-			} else {
-				if (moveY > 0) moveY = 0;
-			}
-			break;
-		case 1:
-			//	Lower left
-			blockX++;
-			if (changedY > (blockY - changedX + blockX)) {
-				if (moveX < 0) moveX = 0;
-			} else {
-				if (moveY > 0) moveY = 0;
-			}
-			break;
-		case 2:
-			//	Upper left
-			blockY++; blockX++;
-			if (changedY > (blockY + changedX - blockX)) {
-				if (moveY < 0) moveY = 0;
-			} else {
-				if (moveX < 0) moveX = 0;
-			}
-			break;
-		case 3:
-			//	Upper right
-			blockY++;
-			if (changedY > (blockY - changedX + blockX)) {
-				if (moveY < 0) moveY = 0;
-			} else {
-				if (moveX > 0) moveX = 0;
-			}
-			break;
-		default:
-			break;
-		}
-		break;
-	case 2:
-		//	Wall hit.
-		index = pointNum[0] + pointNum[1] * 4;
-		switch (index) {
-		case 4:
-			//	Bottom of player (0, 1)
-			if (moveY > 0) moveY = 0;
-			break;
-		case 9:
-			//	Left (1, 2)
-			if (moveX < 0) moveX = 0;
-			break;
-		case 14:
-			//	Top (2, 3)
-			if (moveY < 0) moveY = 0;
-			break;
-		case 12:
-			//	Right (3, 0)
-			if (moveX > 0) moveX = 0;
-			break;
-		case 8:
-		case 13:
-			//	Diagonal corners (partial inside corners (0, 2), (1, 3))
-			moveX = 0; moveY = 0;
-			break;
-		default:
-			break;
-		}
-		break;
-	case 3:
-		//	Inside corner: one free.  Allow motion in that direction.
-		index = pointNum[0] + pointNum[1] * 4 + pointNum[2] * 16;
-		switch (index) {
-		case 57:
-			//	Bottom right open (stuck points 1, 2, 3)
-			if (moveX < 0) moveX = 0;
-			if (moveY < 0) moveY = 0;
-			break;
-		case 56:
-			//	Bottom left (0, 2, 3)
-			if (moveX > 0) moveX = 0;
-			if (moveY < 0) moveY = 0;
-			break;
-		case 52:
-			//	Top left (0, 1, 3)
-			if (moveX > 0) moveX = 0;
-			if (moveY > 0) moveY = 0;
-			break;
-		case 36:
-			//	Top right (0, 1, 2)
-			if (moveX < 0) moveX = 0;
-			if (moveY > 0) moveY = 0;
-			break;
-		default:
-			break;
-		}
-		break;
-	default:
-		//	Stuck in a block?!
-		break;
-	}
-	ctx->camX += moveX; ctx->camY += moveY;
-*/
-
-	return true;
-}
-
-/**
- * Transforms current information (world, camX, camY, camA..)
- * into column colors and heights (columns, colColors).
- */
-void render(GrphContext_t* ctx) {
+void render(GameContext* ctx) {
 	bool isFront, lastPlane, thisPlane;
 	int i, j, sides, queueStart = 1, queueEnd = 0;
 	float angsin, angcos;
@@ -354,10 +131,10 @@ void render(GrphContext_t* ctx) {
 	float lastDist, thisDist;
 	Vec2 col0, delta;
 	RenderQueue queue[GRPH_MAX_RECURSION], *dequeue;
-	Intersect_t intr;
+	Intersect intr;
 	DrawDescriptor dd;
 
-	if (ctx == NULL || ctx->sectors == NULL)
+	if (ctx == NULL || ctx->wrl.sectors == NULL)
 		return;
 
 	//	Clear framebuffer
@@ -367,15 +144,16 @@ void render(GrphContext_t* ctx) {
 		//	first real ceil/upper
 		dd.insert[i] = i;
 		dd.ceilTos[i] = 0;
-		ctx->cols[i].id = ctx->clearId;
-		ctx->cols[i].next = 0;
-		ctx->cols[i].to = GRPH_ROWS;
+		ctx->grph.cols[i].id = ctx->grph.clearId;
+		ctx->grph.cols[i].next = 0;
+		ctx->grph.cols[i].to = GRPH_ROWS;
 	}
-	ctx->colsLen = GRPH_COLUMNS;
+	ctx->grph.colsLen = GRPH_COLUMNS;
 
-	//	View plane is defined by vector; rotate to view angle (note angle is clockwise from +x axis)
-	angsin = sinf(ctx->camA); angcos = cosf(ctx->camA);
-	intr.orig.x = ctx->camX; intr.orig.y = ctx->camY;
+	//	View plane is defined by vector; rotate to view angle (angle
+	//	is clockwise from +x axis; and +y axis is 90° left of +x)
+	angsin = sinf(ctx->grph.cam.a); angcos = cosf(ctx->grph.cam.a);
+	intr.orig.x = ctx->grph.cam.x; intr.orig.y = ctx->grph.cam.y;
 	intr.dist = 1; intr.frac = 0;
 	//	Each column's ray vector is related to the previous by a linear change:
 	//	col0 is the left edge of screen; its conjugate is the right; and delta
@@ -387,28 +165,50 @@ void render(GrphContext_t* ctx) {
 #endif // ARITHMETIC_DEBUG
 
 	//	Start with current sector...
-	queue[0].sector = &ctx->sectors[ctx->currentSectorId];
+	queue[0].sector = &ctx->wrl.sectors[ctx->grph.cam.secId];
 	queue[0].colStart = 0;
 	queue[0].colEnd = GRPH_COLUMNS;
 	//	- Dequeue a sector.  For each side in the sector:
 	//	- If start or end vertex is in front of the view plane, and the
 	//	  side's front is facing the camera,
-	//		- Calculate display column of vertices that passed the view
-	//		  plane check (memoize for next side test).
+	//		- Calculate display column of, and map distance to, vertices
+	//		  that passed the view plane check (memoize for next side
+	//		  test).
 	//		- Skip if both columns < colStarts or >= colEnds.
-	//		- If only one vertex passes this check, calculate line
-	//		  intersection with left display column vector (left vertex
-	//		  failed view plane check or column < 0) or right (right
-	//		  vertex failed view plane check or column >= GRPH_COLUMNS).
-	//		  Use intersection.dist to calculate that column's floor/
-	//		  ceiling .to's.  This solves the left/right-most column.
-	//		- Vertices that pass: calculate dist, then floor/ceiling
-	//		  .to's. This solves the remaining end columns.
-	//		- Interpolate .to's between endpoints.
-	//		- If line is 1-sided, add mid wall after insert[].
+	//		- If only one vertex passes this check, the side must span
+	//		  over one side of the screen.  Calculate line intersection
+	//		  with left display column vector (left vertex failed view
+	//		  plane check or column < 0) or right (right vertex failed
+	//		  view plane check or column >= GRPH_COLUMNS).  Use
+	//		  intersection.dist to calculate that column's floor/ceiling
+	//		  .to's.
+	//		- Vertices that pass and are on screen: calculate dist, then
+	//		  floor/ceiling .to's.
+	//		- Sides where both vertices pass, but colStart/End spans the
+	//		  display, need to be cut once or twice; apply the same
+	//		  processes as above.
+	//		- Interpolate .to's between endpoints.  This solves flat
+	//		  perspective without spending a raycast per column.
+	//		Output formatting:
+	//		- The data structure is a linked list that grows from the
+	//		  middle.  dd.insert[] tracks the insertion point, and
+	//		  dd.ceilTos[] the previous ceiling/upper .to's.
+	//		  (Previous lower is available on cols[insert[]].to, but the
+	//		  singly-linked list prevents easy access to the upper, so
+	//		  we need an array to record that.)
+	//		  Upper/lower .to's are used to eliminate invisible spans
+	//		  and solve occlusion front-to-back.  (This would also act
+	//		  as a crude depth buffer, if a wall/flat flag were stored.)
+	//		  Top of screen starts at ctx->grph.cols[x], going downward; the
+	//		  remainder of the array is allocated sequentially for
+	//		  linked list elements.
+	//		- Add ceiling before, and floor after, insert[], to the draw
+	//		  columns list.
+	//		- If line is 1-sided, set insert[] to the mid wall,
+	//		  completing that column.
 	//		- If 2-sided, get backside sector heights, calculate .to's,
 	//		  and (as applicable) add upper wall before insert[] and
-	//		  lower after insert[].  Enqueue sector and start/end
+	//		  lower after insert[].  Enqueue sector with start/end
 	//		  column span.
 	//	- Repeat until queue is empty.
 	do {
@@ -571,19 +371,22 @@ void render(GrphContext_t* ctx) {
 						if (dequeue->sector->side[i].sectorId == -1) {
 							//	Single-sided: draw mid wall
 							for (j = dd.spanStart; j < dd.spanEnd; j++) {
-								ctx->cols[dd.insert[j]].id = dequeue->sector->side[i].wallId;
+								ctx->grph.cols[dd.insert[j]].id = dequeue->sector->side[i].wallId;
 							}
 						} else {
 							//	Two-sided: draw upper/lower wall as needed, then enqueue the sector
-							Sector_t* farSec = &ctx->sectors[dequeue->sector->side[i].sectorId];
-							dd.upper = dequeue->sector->side[i].wallId;
-							dd.lower = dequeue->sector->side[i].wallId;
-							dd.sec = farSec;
-							drawQuads(ctx, &dd);
-							queue[queueStart].sector = farSec;
-							queue[queueStart].colStart = dd.spanStart;
-							queue[queueStart++].colEnd = dd.spanEnd;
-							if (queueStart >= numelem(queue)) queueStart = 0;
+							int s = dequeue->sector->side[i].sectorId;
+							if (s >= 0 && s < ctx->wrl.sectorsLen) {
+								Sector* farSec = &ctx->wrl.sectors[s];
+								dd.upper = dequeue->sector->side[i].wallId;
+								dd.lower = dequeue->sector->side[i].wallId;
+								dd.sec = farSec;
+								drawQuads(ctx, &dd);
+								queue[queueStart].sector = farSec;
+								queue[queueStart].colStart = dd.spanStart;
+								queue[queueStart++].colEnd = dd.spanEnd;
+								if (queueStart >= numelem(queue)) queueStart = 0;
+							}
 						}
 
 					} else {
@@ -601,7 +404,7 @@ void render(GrphContext_t* ctx) {
 		}
 	} while (queueStart != queueEnd);
 
-	if (ctx->colsLen > ctx->maxColsLen) ctx->maxColsLen = ctx->colsLen;
+	if (ctx->grph.colsLen > ctx->grph.maxColsLen) ctx->grph.maxColsLen = ctx->grph.colsLen;
 
 }
 
@@ -612,7 +415,7 @@ void render(GrphContext_t* ctx) {
  *	@return true on success; false if divide-by-zero (slopes
  *	are equal; intr->side sign is still valid) or intr == NULL.
  */
-bool intersect(Intersect_t* intr) {
+bool intersect(Intersect* intr) {
 
 	if (intr == NULL) return false;
 
@@ -631,17 +434,26 @@ bool intersect(Intersect_t* intr) {
 	return true;
 }
 
-bool drawQuads(GrphContext_t* ctx, DrawDescriptor* dd) {
+/**
+ *	Draws trapezoids to the draw buffer (ctx->cols[]), with
+ *	perspective transformation, and accounting for occlusion
+ *	by graphics "in front of" the described objects.
+ *	@param ctx input geometry and return values.
+ *	dd  (in) geometry
+ *	@return true on success; false if divide-by-zero (slopes
+ *	are equal; intr->side sign is still valid) or intr == NULL.
+ */
+bool drawQuads(GameContext* ctx, DrawDescriptor* dd) {
 	int j;
 
-	if (ctx == NULL || ctx->sectors == NULL || dd == NULL || dd->sec == NULL)
+	if (ctx == NULL || dd == NULL || dd->sec == NULL)
 		return false;
 
 	//	convert dist's to row positions, then interpolate across columns
-	float ceilStart  = (float)GRPH_ROWS / (float)GRPH_FOVMULT * (0.5f - (dd->sec->ceilHeight  - ctx->camZ) / dd->startDist);
-	float ceilEnd    = (float)GRPH_ROWS / (float)GRPH_FOVMULT * (0.5f - (dd->sec->ceilHeight  - ctx->camZ) / dd->endDist  );
-	float floorStart = (float)GRPH_ROWS / (float)GRPH_FOVMULT * (0.5f - (dd->sec->floorHeight - ctx->camZ) / dd->startDist);
-	float floorEnd   = (float)GRPH_ROWS / (float)GRPH_FOVMULT * (0.5f - (dd->sec->floorHeight - ctx->camZ) / dd->endDist  );
+	float ceilStart  = (float)GRPH_ROWS * (float)GRPH_HEIGHT / GRPH_FOVMULT * (0.5f - (dd->sec->ceilHeight  - ctx->grph.cam.z) / dd->startDist);
+	float ceilEnd    = (float)GRPH_ROWS * (float)GRPH_HEIGHT / GRPH_FOVMULT * (0.5f - (dd->sec->ceilHeight  - ctx->grph.cam.z) / dd->endDist  );
+	float floorStart = (float)GRPH_ROWS * (float)GRPH_HEIGHT / GRPH_FOVMULT * (0.5f - (dd->sec->floorHeight - ctx->grph.cam.z) / dd->startDist);
+	float floorEnd   = (float)GRPH_ROWS * (float)GRPH_HEIGHT / GRPH_FOVMULT * (0.5f - (dd->sec->floorHeight - ctx->grph.cam.z) / dd->endDist  );
 	//	should be redundant by logic, might improve compiler inference?
 	if (dd->spanStart < 0) dd->spanStart = 0;
 	if (dd->spanStart > GRPH_COLUMNS - 1) dd->spanStart = GRPH_COLUMNS - 1;
@@ -650,38 +462,38 @@ bool drawQuads(GrphContext_t* ctx, DrawDescriptor* dd) {
 	int span = dd->spanEnd - dd->spanStart;
 	float ceilSlope  = (ceilEnd  - ceilStart ) / (float)span;
 	float floorSlope = (floorEnd - floorStart) / (float)span;
-	DrawCol_t* pdcIns, *pdcNew;
+	DrawCol* pdcIns, *pdcNew;
 	//	draw ceiling and floor
 	for (j = 0; j < span; j++) {
 		int ceilTo = (int)roundf(ceilStart + ceilSlope * ((float)j + 0.5f));
-		pdcIns = &ctx->cols[dd->insert[j + dd->spanStart]];
-		if (ctx->colsLen < numelem(ctx->cols) && ceilTo > dd->ceilTos[j + dd->spanStart]) {
+		pdcIns = &ctx->grph.cols[dd->insert[j + dd->spanStart]];
+		if (ctx->grph.colsLen < numelem(ctx->grph.cols) && ceilTo > dd->ceilTos[j + dd->spanStart]) {
 			//	Ceilings and upper walls get stacked behind insert[]
-			pdcNew = &ctx->cols[ctx->colsLen];	//	make new element, copy from current
+			pdcNew = &ctx->grph.cols[ctx->grph.colsLen];	//	make new element, copy from current
 			pdcNew->to = pdcIns->to;
 			pdcNew->id = pdcIns->id;
 			pdcNew->next = pdcIns->next;
 			//	overwrite current, then advance insert[] past it
 			pdcIns->to = ceilTo;
 			pdcIns->id = dd->upper;
-			pdcIns->next = ctx->colsLen;
-			dd->insert[j + dd->spanStart] = ctx->colsLen;
+			pdcIns->next = ctx->grph.colsLen;
+			dd->insert[j + dd->spanStart] = ctx->grph.colsLen;
 			dd->ceilTos[j + dd->spanStart] = ceilTo;
-			ctx->colsLen++;
+			ctx->grph.colsLen++;
 		}
 		int floorTo = (int)roundf(floorStart + floorSlope * ((float)j + 0.5f));
-		pdcIns = &ctx->cols[dd->insert[j + dd->spanStart]];
-		if (ctx->colsLen < numelem(ctx->cols) && floorTo < pdcIns->to) {
+		pdcIns = &ctx->grph.cols[dd->insert[j + dd->spanStart]];
+		if (ctx->grph.colsLen < numelem(ctx->grph.cols) && floorTo < pdcIns->to) {
 			//	Floors and lowers are pushed ahead of insert[],
 			//	so they draw in opposite order to ceils/uppers
-			pdcNew = &ctx->cols[ctx->colsLen];	//	make new element, copy from current
+			pdcNew = &ctx->grph.cols[ctx->grph.colsLen];	//	make new element, copy from current
 			pdcNew->to = pdcIns->to;
 			pdcNew->id = dd->lower;
 			pdcNew->next = pdcIns->next;
 			//	overwrite current, except keeping its id (which will remain clearId until mid wall overwrites it)
 			pdcIns->to = floorTo;
-			pdcIns->next = ctx->colsLen;
-			ctx->colsLen++;
+			pdcIns->next = ctx->grph.colsLen;
+			ctx->grph.colsLen++;
 		}
 	}
 
