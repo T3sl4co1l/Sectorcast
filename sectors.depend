@@ -1,5 +1,5 @@
 # depslib dependency file v1.0
-1792408821 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
+1792877468 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.c
 	<stddef.h>
 	<stdio.h>
 	<string.h>
@@ -7,12 +7,13 @@
 	"common.h"
 	"sectors.h"
 
-1792409266 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
+1792916169 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
 	<stdbool.h>
 	<stdint.h>
 
-1792408270 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
+1792865407 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
 	"main.h"
+	<windowsx.h>
 	<stdio.h>
 	<stdlib.h>
 	<math.h>
@@ -31,14 +32,15 @@
 
 1792407120 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\common.h
 
-1792408270 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
+1792919221 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
 	<math.h>
+	<stdio.h>
 	<string.h>
 	"common.h"
 	"game.h"
 	"sectors.h"
 
-1792409266 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
+1792916223 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
 	<stdbool.h>
 	<stdint.h>
 	"sectors.h"

@@ -1,4 +1,5 @@
 #include "main.h"
+#include <windowsx.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -16,6 +17,8 @@
 #define STRIP_WIDTH		3
 #define WIDTH			(GRPH_COLUMNS * STRIP_WIDTH)
 
+//#define POSITION_DEBUG
+
 
 /* * * Global Variables * * */
 
@@ -27,6 +30,8 @@ ULONG_PTR gdiplusToken;
 HWND hMainWindow;
 /** Timer handle / ID */
 ULONG_PTR hTimer;
+/** Mouse capture flag */
+BOOL mouseCapture;
 
 /** Color palette to draw everything in */
 ARGB drawPalette[] = {
@@ -49,19 +54,31 @@ ARGB drawPalette[] = {
 };
 
 GameContext game = {
+	calX: {
+		offset: 0,
+		deadband: 0,
+		sensitivity: 96
+	},
+	calY: {
+		offset: 0,
+		deadband: 0,
+		sensitivity: 96
+	},
 	player: {
 		a: 0.0f * M_PI,
 		x: -0.5f,
 		y: -0.25f,
-		z: 0.0f,
-		secId: 0
+		z: -0.6f,
+		secId: 0,
+		radius: GAME_PLAYERSZ,
+		height: GAME_PLAYERHT
 	},
 	grph: {
 		cam: {
 			a: 0.0f * M_PI,
 			x: -0.5f,
 			y: -0.25f,
-			z: 0.0f,
+			z: -0.6f + GAME_PLAYERCAM,
 			secId: 0
 		},
 		clearId: 0
@@ -75,11 +92,15 @@ GameContext game = {
 
 /* * * Functions * * */
 
+void setPosAroundConsole(HWND hwnd);
+void toggleMouseCapture(void);
+
+
 /**
  *	Main Entry Point
  */
 int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszArgument, int nCmdShow) {
-	MSG msgs;
+	MSG msg;
 	WNDCLASSEX wincl;
 	GdiplusStartupInput gdiSI;
 	int err;
@@ -90,16 +111,32 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	printf("Sectorcast " VERSION_STRING "\n"
 	       "Flat shaded, lines, sectors and portals engine\n"
 	       "By Tim Williams, " __DATE__ "\n");
-	if (!strlen(lpszArgument)) {
-		printf("\nUsage: SECTORS <mapname>\n");
-		return 0;
-	}
 
-	//	trim space around filename
-	while (isspace(*lpszArgument)) lpszArgument++;
-	for (int i = strlen(lpszArgument) - 1; i > 0 && isspace(lpszArgument[i]); i--)
-		lpszArgument[i] = '\0';
-
+//	if (!strlen(lpszArgument)) {
+//		printf("\nUsage: SECTORS <mapname>\n");
+//		return 0;
+//	} else {
+		printf("\n"
+		       "Keys:\n"
+		       "    W, UARROW  Forward\n"
+		       "    S, DARROW  Backpedal\n"
+		       "    A          Strafe left\n"
+		       "    D          Strafe right\n"
+		       "    F          Move up\n"
+		       "    C          Move down\n"
+		       "    LARROW     Turn left\n"
+		       "    RARROW     Turn right\n"
+		       "    SHIFT      Speed\n"
+		       "    ESC        Quit\n"
+		       "    TAB        Capture/release mouse\n"
+		       "\n");
+//	}
+//
+//	//	trim space around filename
+//	while (isspace(*lpszArgument)) lpszArgument++;
+//	for (int i = strlen(lpszArgument) - 1; i > 0 && isspace(lpszArgument[i]); i--)
+//		lpszArgument[i] = '\0';
+//
 //	printf("Loading map \"%s\"...\n", lpszArgument);
 //	if ((err = loadMap(lpszArgument))) {
 //		if (err == -1) {
@@ -164,11 +201,23 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		return 3;
 	}
 
+	setPosAroundConsole(hMainWindow);
+
 	hTimer = SetTimer(hMainWindow, 1, 1000 / GAME_FRAMERATE, NULL);
 	if (!hTimer) {
 		printf("SetTimer failed with error 0x%lx.\n", GetLastError());
 		return 4;
 	}
+
+	RAWINPUTDEVICE rid[] = {
+		{
+			usUsagePage: 0x01,	//	HID_USAGE_PAGE_GENERIC
+			usUsage: 0x02,	//	HID_USAGE_GENERIC_MOUSE
+			dwFlags: 0
+		}
+	};
+	if (!RegisterRawInputDevices(rid, numelem(rid), sizeof(RAWINPUTDEVICE)))
+		printf("RegisterRawInputDevices() error 0x%lx\n", GetLastError());
 
 	doGameTic(&game);	//	prepare graphics context
 	render(&game);	//	and render it for the first time
@@ -176,12 +225,16 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 	//	Make the window visible on the screen
 	ShowWindow(hMainWindow, nCmdShow);
 
-	/* Run the message loop. It will run until GetMessage() returns 0 */
-	while (GetMessage(&msgs, NULL, 0, 0)) {
-		//	Translate virtual-key messages into character messages
-		TranslateMessage(&msgs);
-		//	Send message to WindowProc
-		DispatchMessage(&msgs);
+	//	Windows
+	while (GetMessage(&msg, NULL, 0, 0)) {
+		//	Dispatch drops ALT press?
+		if (msg.message == WM_SYSKEYDOWN && msg.wParam == VK_MENU) {
+			setKeyState((int)msg.wParam, true);
+		} else if (msg.message == WM_SYSKEYUP && msg.wParam == VK_MENU) {
+			setKeyState((int)msg.wParam, false);
+		} else {
+			DispatchMessage(&msg);
+		}
 	}
 
 	return 0;
@@ -192,8 +245,35 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
  */
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	static _Atomic bool inGameTic = false;
+	static RECT rWnd;
+	static BOOL mouseWasCapture;
 
 	switch(msg) {
+	case WM_SETFOCUS:
+		if (mouseWasCapture) {
+			mouseWasCapture = FALSE;
+			toggleMouseCapture();
+		}
+		break;
+	case WM_KILLFOCUS:
+		if (mouseCapture) {
+			mouseWasCapture = TRUE;
+			toggleMouseCapture();
+		}
+		break;
+	case WM_WINDOWPOSCHANGED:
+		//	lParam pointer to WINDOWPOS describing window; convert to RECT
+		rWnd.left   = ((WINDOWPOS*)lParam)->x;
+		rWnd.top    = ((WINDOWPOS*)lParam)->y;
+		rWnd.right  = rWnd.left + ((WINDOWPOS*)lParam)->cx;
+		rWnd.bottom = rWnd.top  + ((WINDOWPOS*)lParam)->cy;
+		break;
+	case WM_SIZING:
+		//	window not resizable, unused
+	case WM_MOVING:
+		//	lParam pointer to RECT of current window size; make a copy
+		memcpy((void*)&rWnd, (void*)lParam, sizeof(rWnd));
+		break;
 	case WM_TIMER:
 		if ((ULONG_PTR)wParam == hTimer) {
 			//	Not that Windows should be calling us from multiple
@@ -202,12 +282,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 				//	Handle timer tic
 				int ticFlags = doGameTic(&game);
+				//	consume mouse axis movement
+				game.ctrl.xAxis = 0; game.ctrl.yAxis = 0;
 				if (ticFlags & GAMETIC_MOVED) {
 					render(&game);
 					RedrawWindow(hMainWindow, NULL, NULL, RDW_INVALIDATE);
 				}
-				if (ticFlags & GAMETIC_COLLISION)
-					MessageBeep(MB_ICONEXCLAMATION);	//	Hit something, play a sound
+				//if (ticFlags & GAMETIC_COLLISION)
+				//	MessageBeep(MB_ICONEXCLAMATION);	//	Hit something, play a sound
 
 				__atomic_store_n(&inGameTic, false, __ATOMIC_RELEASE);
 			}
@@ -217,8 +299,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		setKeyState((int)wParam, false);
 		break;
 	case WM_KEYDOWN:
-		if (~lParam & (1 << 30)) {
+		if (~lParam & (1 << 30))
 			setKeyState((int)wParam, true);
+		break;
+	case WM_INPUT:
+		//	pointer registered, get its data
+		if (!mouseCapture)
+			return DefWindowProc(hwnd, msg, wParam, lParam);
+		RAWINPUT ri;
+		UINT sz = sizeof(ri);
+		GetRawInputData((HRAWINPUT)lParam, RID_INPUT, (LPVOID)&ri, &sz, sizeof(RAWINPUTHEADER));
+		if (ri.header.dwType == RIM_TYPEMOUSE && ri.data.mouse.usFlags == MOUSE_MOVE_RELATIVE) {
+			game.ctrl.xAxis += ri.data.mouse.lLastX;
+			game.ctrl.yAxis -= ri.data.mouse.lLastY;
 		}
 		break;
 	case WM_ACTIVATE:
@@ -284,10 +377,10 @@ BOOL OnPaint(void) {
 }
 
 /**
- *	Convert virtual key messages into control inputs.
+ *	Translate virtual key messages into control inputs.
  */
 void setKeyState(int key, BOOL pressed) {
-	int k;
+	uint32_t k = 0;
 
 	switch (key) {
 	case VK_UP:
@@ -315,13 +408,132 @@ void setKeyState(int key, BOOL pressed) {
 	case 'C':
 		k = GAMECTRL_FLYDOWN;
 		break;
+	case VK_SHIFT:
+		k = GAMECTRL_SPEED;
+		break;
+	case VK_MENU:
+		k = GAMECTRL_SLIDE;
+		break;
+	case VK_TAB:
+		if (pressed)
+			toggleMouseCapture();
+		return;
 	case VK_ESCAPE:
 		SendMessage(hMainWindow, WM_DESTROY, 0, 0);
 		return;
 	default:
 		return;
 	}
-	game.controls[k] = pressed;
+	if (pressed)
+		game.ctrl.buttons |= k;
+	else
+		game.ctrl.buttons &= ~k;
+
+}
+
+/**
+ *	Toggle mouse capture of the main window.
+ */
+void toggleMouseCapture(void) {
+	RECT rect;
+	POINT pt;
+
+	mouseCapture = !mouseCapture;
+	if (mouseCapture) {
+		SetCapture(hMainWindow);
+		GetClientRect(hMainWindow, &rect);
+		pt.x = rect.left; pt.y = rect.top;
+		ClientToScreen(hMainWindow, &pt);
+		rect.left = pt.x; rect.top = pt.y;
+		pt.x = rect.right + 1; pt.y = rect.bottom + 1;
+		ClientToScreen(hMainWindow, &pt);
+		rect.right = pt.x; rect.bottom = pt.y;
+		ClipCursor(&rect);
+		ShowCursor(FALSE);
+		//SetCursorPos((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2);
+	} else {
+		ClipCursor(NULL);
+		ReleaseCapture();
+		ShowCursor(TRUE);
+	}
+
+}
+
+/**
+ *	Positions hwnd relative to the console attached to
+ *	this process, if any.
+ */
+void setPosAroundConsole(HWND hwnd) {
+	HWND hCons;
+	HMONITOR hMon;
+	WINDOWINFO wi;
+	MONITORINFO mi;
+	RECT rCons;
+	RECT rWnd;
+	RECT rScreen;
+
+	hCons = GetConsoleWindow();
+	if (hCons == NULL) return;
+
+	wi.cbSize = sizeof(WINDOWINFO);
+	GetWindowInfo(hCons, &wi);
+	memcpy((void*)&rCons, (void*)&wi.rcWindow, sizeof(RECT));
+#ifdef POSITION_DEBUG
+	printf("console: %li, %li; %li, %li\n", wi.rcWindow.left,
+			wi.rcWindow.top, wi.rcWindow.right, wi.rcWindow.bottom);
+#endif // POSITION_DEBUG
+
+	GetWindowInfo(hwnd, &wi);
+	memcpy((void*)&rWnd, (void*)&wi.rcWindow, sizeof(RECT));
+#ifdef POSITION_DEBUG
+	printf("window: %li, %li; %li, %li\n", wi.rcWindow.left,
+			wi.rcWindow.top, wi.rcWindow.right, wi.rcWindow.bottom);
+#endif // POSITION_DEBUG
+
+	hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+	//	If they're not on the same screen, it's probably fine
+	if (MonitorFromWindow(hCons, MONITOR_DEFAULTTONEAREST) != hMon) return;
+
+	mi.cbSize = sizeof(MONITORINFO);
+	GetMonitorInfoA(hMon, &mi);
+	memcpy((void*)&rScreen, (void*)&mi.rcWork, sizeof(RECT));
+#ifdef POSITION_DEBUG
+	printf("screen: %li, %li; %li, %li\n", rScreen.left,
+			rScreen.top, rScreen.right, rScreen.bottom);
+#endif // POSITION_DEBUG
+
+	LONG width = rWnd.right - rWnd.left;
+	LONG height = rWnd.bottom - rWnd.top;
+	const int COMFYSPACE = 40;
+	//	Prefer placement below or right of console;
+	if (rScreen.bottom - rCons.bottom > height + COMFYSPACE) {
+		rWnd.left = rCons.left + COMFYSPACE / 2;
+		rWnd.top = rCons.bottom + COMFYSPACE / 2;
+	} else if (rScreen.right - rCons.right > width + COMFYSPACE) {
+		rWnd.left = rCons.right + COMFYSPACE / 2;
+		rWnd.top = rCons.top + COMFYSPACE / 2;
+	//	if there's not enough space for a comfy fit, try above or left;
+	} else if (rCons.top - rScreen.top > height + COMFYSPACE) {
+		rWnd.left = rCons.left + COMFYSPACE / 2;
+		rWnd.top = rCons.top - height - COMFYSPACE / 2;
+	} else if (rCons.left - rScreen.left > width + COMFYSPACE) {
+		rWnd.left = rCons.left - width - COMFYSPACE / 2;
+		rWnd.top = rCons.top + COMFYSPACE / 2;
+	//	otherwise, justify towards whichever screen edge leaves the
+	//	most console visible
+	} else if (rScreen.right - rCons.right - 2 * (rCons.right - rCons.left) / 3 > width + COMFYSPACE / 2) {
+		rWnd.left = rScreen.right - width - COMFYSPACE / 4;
+		rWnd.top = rCons.top + COMFYSPACE / 2;
+	} else if (rScreen.bottom - rCons.bottom - (rCons.bottom - rCons.top) / 2 > height + COMFYSPACE / 2) {
+		rWnd.left = rCons.left + COMFYSPACE / 2;
+		rWnd.top = rScreen.bottom - height - COMFYSPACE / 4;
+	}
+	if (rWnd.left > rScreen.right - width) rWnd.left = rScreen.right - width - COMFYSPACE / 4;
+	if (rWnd.top > rScreen.bottom - height) rWnd.top = rScreen.bottom - height - COMFYSPACE / 4;
+	if (rWnd.left < rScreen.left + COMFYSPACE / 4) rWnd.left = rScreen.left + COMFYSPACE / 4;
+	if (rWnd.top < rScreen.top + COMFYSPACE / 4) rWnd.top = rScreen.top + COMFYSPACE / 4;
+
+	MoveWindow(hwnd, rWnd.left, rWnd.top, width, height, FALSE);
 
 }
 

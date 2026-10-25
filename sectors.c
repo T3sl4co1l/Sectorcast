@@ -71,19 +71,19 @@ Sector sectors[] = {
 		start: { -2.0f, -1.3f },
 		side: {
 			{
-				sectorId: -1,
+				secId: -1,
 				wallId: 3,
 				to: { -2.0f, 1.5f }
 			}, {
-				sectorId: -1,
+				secId: -1,
 				wallId: 1,
 				to: { 1.0f, 1.5f }
 			}, {
-				sectorId: 1,
+				secId: 1,
 				wallId: 3,
 				to: { 1.0f, -1.5f }
 			}, {
-				sectorId: -1,
+				secId: -1,
 				wallId: 2,
 				to: { -2.0f, -1.3f }
 			}
@@ -99,20 +99,20 @@ Sector sectors[] = {
 		start: { 1.0f, 1.5f },
 		side: {
 			{
-				sectorId: -1,
-				wallId: 4,
+				secId: -1,
+				wallId: 10,
 				to: { 4.0f, 3.0f }
 			}, {
-				sectorId: -1,
-				wallId: 5,
+				secId: -1,
+				wallId: 11,
 				to: { 4.0f, -0.75f }
 			}, {
-				sectorId: -1,
-				wallId: 6,
+				secId: -1,
+				wallId: 12,
 				to: { 1.0f, -1.5f }
 			}, {
-				sectorId: 0,
-				wallId: 0,
+				secId: 0,
+				wallId: 13,
 				to: { 1.0f, 1.5f }
 			}
 		}
@@ -120,8 +120,8 @@ Sector sectors[] = {
 };
 
 /**
- * Transforms current graphics context (sectors, camX/Y/Z/A..)
- * into column colors and heights (cols).
+ *	Transforms current graphics context (wrl, grph.cam...)
+ *	into column colors and heights (cols[]).
  */
 void render(GameContext* ctx) {
 	bool isFront, lastPlane, thisPlane;
@@ -129,12 +129,12 @@ void render(GameContext* ctx) {
 	float angsin, angcos;
 	float lastCol, thisCol;
 	float lastDist, thisDist;
-	Vec2 col0, delta;
+	Vec2 d1, col0, delta;
 	RenderQueue queue[GRPH_MAX_RECURSION], *dequeue;
 	Intersect intr;
 	DrawDescriptor dd;
 
-	if (ctx == NULL || ctx->wrl.sectors == NULL)
+	if (ctx == NULL)
 		return;
 
 	//	Clear framebuffer
@@ -149,6 +149,10 @@ void render(GameContext* ctx) {
 		ctx->grph.cols[i].to = GRPH_ROWS;
 	}
 	ctx->grph.colsLen = GRPH_COLUMNS;
+
+	//	we can't draw anything more if we don't have a world to draw... but we can clear screen I guess?
+	if (ctx->wrl.sectors == NULL)
+		return;
 
 	//	View plane is defined by vector; rotate to view angle (angle
 	//	is clockwise from +x axis; and +y axis is 90° left of +x)
@@ -168,49 +172,51 @@ void render(GameContext* ctx) {
 	queue[0].sector = &ctx->wrl.sectors[ctx->grph.cam.secId];
 	queue[0].colStart = 0;
 	queue[0].colEnd = GRPH_COLUMNS;
-	//	- Dequeue a sector.  For each side in the sector:
-	//	- If start or end vertex is in front of the view plane, and the
-	//	  side's front is facing the camera,
-	//		- Calculate display column of, and map distance to, vertices
-	//		  that passed the view plane check (memoize for next side
-	//		  test).
-	//		- Skip if both columns < colStarts or >= colEnds.
-	//		- If only one vertex passes this check, the side must span
-	//		  over one side of the screen.  Calculate line intersection
-	//		  with left display column vector (left vertex failed view
-	//		  plane check or column < 0) or right (right vertex failed
-	//		  view plane check or column >= GRPH_COLUMNS).  Use
-	//		  intersection.dist to calculate that column's floor/ceiling
-	//		  .to's.
-	//		- Vertices that pass and are on screen: calculate dist, then
-	//		  floor/ceiling .to's.
-	//		- Sides where both vertices pass, but colStart/End spans the
-	//		  display, need to be cut once or twice; apply the same
-	//		  processes as above.
-	//		- Interpolate .to's between endpoints.  This solves flat
-	//		  perspective without spending a raycast per column.
-	//		Output formatting:
-	//		- The data structure is a linked list that grows from the
-	//		  middle.  dd.insert[] tracks the insertion point, and
-	//		  dd.ceilTos[] the previous ceiling/upper .to's.
-	//		  (Previous lower is available on cols[insert[]].to, but the
-	//		  singly-linked list prevents easy access to the upper, so
-	//		  we need an array to record that.)
-	//		  Upper/lower .to's are used to eliminate invisible spans
-	//		  and solve occlusion front-to-back.  (This would also act
-	//		  as a crude depth buffer, if a wall/flat flag were stored.)
-	//		  Top of screen starts at ctx->grph.cols[x], going downward; the
-	//		  remainder of the array is allocated sequentially for
-	//		  linked list elements.
-	//		- Add ceiling before, and floor after, insert[], to the draw
-	//		  columns list.
-	//		- If line is 1-sided, set insert[] to the mid wall,
-	//		  completing that column.
-	//		- If 2-sided, get backside sector heights, calculate .to's,
-	//		  and (as applicable) add upper wall before insert[] and
-	//		  lower after insert[].  Enqueue sector with start/end
-	//		  column span.
-	//	- Repeat until queue is empty.
+	/*
+	 *	- Dequeue a sector.  For each side in the sector:
+	 *	- If start or end vertex is in front of the view plane, and the
+	 *	  side's front is facing the camera,
+	 *		- Calculate display column of, and map distance to, vertices
+	 *		  that passed the view plane check (memoize for next side
+	 *		  test).
+	 *		- Skip if both columns < colStarts or >= colEnds.
+	 *		- If only one vertex passes this check, the side must span
+	 *		  over one side of the screen.  Calculate line intersection
+	 *		  with left display column vector (left vertex failed view
+	 *		  plane check or column < 0) or right (right vertex failed
+	 *		  view plane check or column >= GRPH_COLUMNS).  Use
+	 *		  intersection.dist to calculate that column's floor/ceiling
+	 *		  .to's.
+	 *		- Vertices that pass and are on screen: calculate dist, then
+	 *		  floor/ceiling .to's.
+	 *		- Sides where both vertices pass, but colStart/End spans the
+	 *		  display, need to be cut once or twice; apply the same
+	 *		  processes as above.
+	 *		- Interpolate .to's between endpoints.  This solves flat
+	 *		  perspective without spending a raycast per column.
+	 *		Output formatting:
+	 *		- The data structure is a linked list that grows from the
+	 *		  middle.  dd.insert[] tracks the insertion point, and
+	 *		  dd.ceilTos[] the previous ceiling/upper .to's.
+	 *		  (Previous lower is available on cols[insert[]].to, but the
+	 *		  singly-linked list prevents easy access to the upper, so
+	 *		  we need an array to record that.)
+	 *		  Upper/lower .to's are used to eliminate invisible spans
+	 *		  and solve occlusion front-to-back.  (This would also act
+	 *		  as a crude depth buffer, if a wall/flat flag were stored.)
+	 *		  Top of screen starts at ctx->grph.cols[x], going downward;
+	 *		  the remainder of the array is allocated sequentially for
+	 *		  linked list elements.
+	 *		- Add ceiling before, and floor after, insert[], to the draw
+	 *		  columns list.
+	 *		- If line is 1-sided, set insert[] to the mid wall,
+	 *		  completing that column.
+	 *		- If 2-sided, get backside sector heights, calculate .to's,
+	 *		  and (as applicable) add upper wall before insert[] and
+	 *		  lower after insert[].  Enqueue sector with start/end
+	 *		  column span.
+	 *	- Repeat until queue is empty.
+	 */
 	do {
 		dequeue = &queue[queueEnd++];
 		if (queueEnd >= numelem(queue)) queueEnd = 0;
@@ -219,8 +225,8 @@ void render(GameContext* ctx) {
 #endif // ARITHMETIC_DEBUG
 		//	prime the loop's sliding window...
 		intr.end.x = dequeue->sector->start.x; intr.end.y = dequeue->sector->start.y;
-		Vec2 d1 = { intr.orig.x - intr.end.x, intr.orig.y - intr.end.y };
-		thisPlane = (d1.x * delta.y - delta.x * d1.y) > 0;
+		d1 = (Vec2){ intr.orig.x - intr.end.x, intr.orig.y - intr.end.y };
+		thisPlane = (d1.x * delta.y - delta.x * d1.y) >= GRPH_PLANECOMPARE;
 		thisCol = 0; thisDist = 0;
 		if (thisPlane) {
 			thisCol = (d1.x * col0.y - col0.x * d1.y) / (delta.x * d1.y - d1.x * delta.y);
@@ -234,7 +240,7 @@ void render(GameContext* ctx) {
 			lastPlane = thisPlane; lastCol = thisCol; lastDist = thisDist;
 
 			d1.x = intr.orig.x - intr.end.x; d1.y = intr.orig.y - intr.end.y;
-			thisPlane = (d1.x * delta.y - delta.x * d1.y) > 0;
+			thisPlane = (d1.x * delta.y - delta.x * d1.y) >= GRPH_PLANECOMPARE;
 			thisCol = 0; thisDist = 0;
 			dd.startDist = 0; dd.endDist = 0;
 #ifdef ARITHMETIC_DEBUG
@@ -244,7 +250,7 @@ void render(GameContext* ctx) {
 			//	At least one vertex is in front of the view plane; is the side visible?
 			if (thisPlane || lastPlane) {
 				//	is the side's front facing the camera? (backface culling)
-				isFront = (d1.x * (intr.end.y - intr.start.y) - (intr.end.x - intr.start.x) * d1.y) > 0;
+				isFront = (d1.x * (intr.end.y - intr.start.y) - (intr.end.x - intr.start.x) * d1.y) >= GRPH_PLANECOMPARE;
 				if (isFront) {
 
 					//	Basic checks pass; transform to screen plane
@@ -368,14 +374,14 @@ void render(GameContext* ctx) {
 						drawQuads(ctx, &dd);
 
 						//	...and walls
-						if (dequeue->sector->side[i].sectorId == -1) {
+						if (dequeue->sector->side[i].secId == -1) {
 							//	Single-sided: draw mid wall
 							for (j = dd.spanStart; j < dd.spanEnd; j++) {
 								ctx->grph.cols[dd.insert[j]].id = dequeue->sector->side[i].wallId;
 							}
 						} else {
 							//	Two-sided: draw upper/lower wall as needed, then enqueue the sector
-							int s = dequeue->sector->side[i].sectorId;
+							int s = dequeue->sector->side[i].secId;
 							if (s >= 0 && s < ctx->wrl.sectorsLen) {
 								Sector* farSec = &ctx->wrl.sectors[s];
 								dd.upper = dequeue->sector->side[i].wallId;

@@ -21,26 +21,34 @@
 #define GRPH_MAX_RECURSION	20
 /** Extra columns in GrphContext_t.cols for recursive chaining */
 #define GRPH_LISTBUF   	(GRPH_COLUMNS * 7)
-
+/** Threshold to decide whether a point is in front of the view plane (isPlane and isFront checks) */
+#define GRPH_PLANECOMPARE	0
 
 /* * * Type Declarations * * */
 
-/** Named indices of GameContext.controls[] */
+/** Controls.buttons bit fields */
 enum GAMECTRL_e {
-	GAMECTRL_FWD,
-	GAMECTRL_REV,
-	GAMECTRL_TURNLEFT,
-	GAMECTRL_TURNRIGHT,
-	GAMECTRL_STRAFELEFT,
-	GAMECTRL_STRAFERIGHT,
-	GAMECTRL_FLYUP,
-	GAMECTRL_FLYDOWN,
-	GAMECTRL_MAXKEY = GAMECTRL_FLYDOWN
+	GAMECTRL_FWD         = 0x0001,
+	GAMECTRL_REV         = 0x0002,
+	GAMECTRL_TURNLEFT    = 0x0004,
+	GAMECTRL_TURNRIGHT   = 0x0008,
+	GAMECTRL_STRAFELEFT  = 0x0010,
+	GAMECTRL_STRAFERIGHT = 0x0020,
+	GAMECTRL_FLYUP       = 0x0040,
+	GAMECTRL_FLYDOWN     = 0x0080,
+	GAMECTRL_SPEED       = 0x0100,
+	GAMECTRL_SLIDE       = 0x0200
 };
 
 typedef int TextureId;
 
 typedef int PaletteId;
+
+typedef struct AxisConditioning_s {
+	int offset;
+	int deadband;
+	int sensitivity;
+} AxisCal;
 
 typedef struct Vec2_s {
 	float x;
@@ -55,17 +63,19 @@ typedef struct Vec3_s {
 
 /** Position of an entity in 3D space */
 typedef struct EntityPos_s {
-	float x;	/**< x coordinate */
-	float y;	/**< y coordinate */
-	float z;	/**< z coordinate */
-	float a;	/**< Facing angle (0 ... 2 * PI radians) */
+	float x;  	/**< x coordinate */
+	float y;  	/**< y coordinate */
+	float z;  	/**< z coordinate */
+	float a;  	/**< Facing angle (0 ... 2 * PI radians) */
 	int secId;	/**< Current sector ID */
+	float radius;	/**< Entity radius (x-y plane) */
+	float height;	/**< Entity height (from z to z + height) */
 } EntityPos;
 
 typedef struct Side_s {
-	int sectorId;	/**< Backside sector, or -1 if single-sided    */
-	int wallId;  	/**< Front-side wall descriptor (as ID)        */
-	Vec2 to;     	/**< Side is drawn from previous point to here */
+	int secId; 	/**< Backside sector, or -1 if single-sided    */
+	int wallId;	/**< Front-side wall descriptor (as ID)        */
+	Vec2 to;   	/**< Side is drawn from previous point to here */
 } Side;
 
 typedef struct __attribute__((aligned(4))) SectorFileHeader_s {
@@ -153,9 +163,18 @@ typedef struct GameWorld_s {
 	Sector* sectors;	/**< (in) Pointer to sector list */
 } GameWorld;
 
+/** Control inputs */
+typedef struct Controls_s {
+	uint32_t buttons;	/**< Bit vector, current button state (from GAMECTRL_e) */
+	int xAxis;	/**< Horizontal (turn/slide) axis */
+	int yAxis;	/**< Vertical (move) axis */
+} Controls;
+
 /** Fields of Gamestate (pseudo)class */
 typedef struct GameContext_s {
-	bool controls[GAMECTRL_MAXKEY + 1];	/**< (in) Control inputs */
+	AxisCal calX; 	/**< Control X axis calibration */
+	AxisCal calY; 	/**< Control Y axis calibration */
+	Controls ctrl;	/**< Control inputs */
 	EntityPos player;	/**< Player position  */
 	GrphContext grph;	/**< Graphics context */
 	GameWorld wrl;   	/**< World data */
