@@ -6,6 +6,8 @@
 #include "sectors.h"
 
 
+//#define COLLISION_DEBUG
+
 /**
  *	Conditions an input axis, applying offset, cutting
  *	out a deadband near zero, and scaling and clamping
@@ -44,7 +46,7 @@ void trimControlAxis(int* x, AxisCal* cal) {
  *	GRPHTIC_COLLISION movement truncated by wall (maybe play a sound?)
  */
 int doGameTic(GameContext* game) {
-	bool moveFlag = false, collisionFlag = false;
+	bool moveFlag = false;
 	int r = 0;
 	union Player_u {
 		Vec3 mv;
@@ -61,16 +63,14 @@ int doGameTic(GameContext* game) {
 	game->player.a = pl.ep.a;
 
 	if (moveFlag) {
-		collisionFlag = collisionDetect(game, &game->player, &pl.mv, GAME_COLLISION_PORTALS);
-
+		r = collisionDetect(game, &game->player, &pl.mv,
+				(game->ctrl.buttons & GAMECTRL_NOCLIP) ? GAME_COLLISION_PORTALS : GAME_COLLISION_CHEAP
+				) | GAMETIC_MOVED;
 		//	Place camera as desired
 		memcpy((void*)&game->grph.cam, (void*)&game->player, sizeof(game->grph.cam));
 		//	assuming player entity is snapped to normal floor/ceiling range, add camera height offset
 		game->grph.cam.z += GAME_PLAYERCAM;
 	}
-
-	if (moveFlag) r |= GAMETIC_MOVED;
-	if (collisionFlag) r |= GAMETIC_COLLISION;
 
 	return r;
 }
@@ -109,31 +109,35 @@ bool getControlMovement(Controls* ctrl, EntityPos* ent) {
 		step *= GAME_ACCELERATOR;
 	}
 	if (ctrl->buttons & GAMECTRL_FWD) {
-		ent->x += step * angcos;
-		ent->y += step * angsin;
+		ent->x += step * angcos; ent->y += step * angsin;
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_REV) {
-		ent->x -= step * angcos;
-		ent->y -= step * angsin;
+		ent->x -= step * angcos; ent->y -= step * angsin;
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_TURNLEFT) {
-		ent->a += ((ctrl->buttons & GAMECTRL_SPEED) ? GAME_ANGLESTEP * 2 : GAME_ANGLESTEP);
+		if (ctrl->buttons & GAMECTRL_SLIDE) {
+			ent->x -= step * angsin; ent->y += step * angcos;
+		} else {
+			ent->a += ((ctrl->buttons & GAMECTRL_SPEED) ? GAME_ANGLESTEP * 2 : GAME_ANGLESTEP);
+		}
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_TURNRIGHT) {
-		ent->a -= ((ctrl->buttons & GAMECTRL_SPEED) ? GAME_ANGLESTEP * 2 : GAME_ANGLESTEP);
+		if (ctrl->buttons & GAMECTRL_SLIDE) {
+			ent->x += step * angsin; ent->y -= step * angcos;
+		} else {
+			ent->a -= ((ctrl->buttons & GAMECTRL_SPEED) ? GAME_ANGLESTEP * 2 : GAME_ANGLESTEP);
+		}
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_STRAFELEFT) {
-		ent->x -= step * angsin;
-		ent->y += step * angcos;
+		ent->x -= step * angsin; ent->y += step * angcos;
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_STRAFERIGHT) {
-		ent->x += step * angsin;
-		ent->y -= step * angcos;
+		ent->x += step * angsin; ent->y -= step * angcos;
 		moveFlag = true;
 	}
 	if (ctrl->buttons & GAMECTRL_FLYUP) {
@@ -176,9 +180,10 @@ int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type) {
 	if (type <= GAME_COLLISION_NONE || type > GAME_COLLISION_SNAP) {
 
 		ent->x += mv->x; ent->y += mv->y; ent->z += mv->z;
+
 		return false;
 
-	} else if (type == GAME_COLLISION_PORTALS) {
+	} else if (type == GAME_COLLISION_PORTALS || type == GAME_COLLISION_CHEAP) {
 
 		/*
 		 *	Starting from ent's sector,
@@ -199,28 +204,48 @@ int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type) {
 			for (i = 0; i < sides; i++) {
 				intr.start.x = intr.end.x; intr.start.y = intr.end.y;
 				intr.end.x = curSec->side[i].to.x; intr.end.y = curSec->side[i].to.y;
+
 				if (curSec->side[i].secId >= 0) {
 					bool f = intersect(&intr);
-					//bool intersectsFront = ((intr.end.x - intr.start.x) * intr.dir.y - intr.dir.x * (intr.end.y - intr.start.y)) > 0;//GRPH_PLANECOMPARE;
-					if (f && intr.side > 0 && /* intersectsFront && */ intr.dist > 0 && intr.dist <= 1) {
+					if (f && intr.side > 0 && intr.frac >= 0 && intr.frac < 1 && intr.dist > 0 && intr.dist <= 1) {
 						//	move intersects facing side
+						if (curSec->side[i].secId >= 0) {
+							//	two-sided (portal), take it
 #ifdef COLLISION_DEBUG
-						printf("2-sided collision, dist %e", intr.dist);
+							printf("2-sided collision, dist %e", intr.dist);
 #endif // COLLISION_DEBUG
-						r |= GAMETIC_PORTAL;
-						intr.orig.x += intr.dist * intr.dir.x; intr.orig.y += intr.dist * intr.dir.y;
-						intr.dir.x -= intr.dist * intr.dir.x; intr.dir.y -= intr.dist * intr.dir.y;
-						int s = curSec->side[i].secId;
-						if (s != prevSec && s >= 0 && s < game->wrl.sectorsLen) {
+							r |= GAMETIC_PORTAL;
+							intr.orig.x += intr.dist * intr.dir.x; intr.orig.y += intr.dist * intr.dir.y;
+							intr.dir.x -= intr.dist * intr.dir.x; intr.dir.y -= intr.dist * intr.dir.y;
+							int s = curSec->side[i].secId;
+							if (s != prevSec && s >= 0 && s < game->wrl.sectorsLen) {
 #ifdef COLLISION_DEBUG
-							printf(", from sec %i to %i", ent->secId, s);
+								printf(", from sec %i to %i", ent->secId, s);
 #endif // COLLISION_DEBUG
-							prevSec = ent->secId;
-							ent->secId = s;
+								prevSec = ent->secId;
+								ent->secId = s;
+							}
+							break;
 						}
+					}
+				} else if (type == GAME_COLLISION_CHEAP) {
+					//	single-sided, check if close enough to collide
+					float distSq = ent->radius * ent->radius;
+					float sideNormSq = (intr.end.x - intr.start.x) * (intr.end.x - intr.start.x)
+							+ (intr.end.y - intr.start.y) * (intr.end.y - intr.start.y);
+					distSq *= sideNormSq;
+					float crossSq = (intr.end.x - intr.start.x) * (intr.orig.y + intr.dir.y - intr.start.y)
+							- (intr.orig.x + intr.dir.x - intr.start.x) * (intr.end.y - intr.start.y);
+					if (crossSq * crossSq < distSq || crossSq > 0) {
+						//	movement would go into a wall hitbox or out-of-bounds, cancel the remainder
+#ifdef COLLISION_DEBUG
+						printf("1-sided collision, sec %i, side %i, distSq %e, crossSq %e\n", ent->secId, i, distSq, crossSq);
+#endif // COLLISION_DEBUG
+						intr.dir.x = 0; intr.dir.y = 0;
 						break;
 					}
 				}
+
 			}
 			if (i >= sides) {
 				//	for loop terminated without break -->
@@ -242,21 +267,33 @@ int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type) {
 		ent->z = tmpZ;
 
 		return r;
+
+	} else if (type == GAME_COLLISION_NORMAL || type == GAME_COLLISION_SNAP) {
+
+		if (type == GAME_COLLISION_SNAP) {
+			//	iterate over sides of sector, translating inward by radius; find nearest
+		}
+
+		return r;
+
 	}
 	/*
-	 *	Perform vector collision where possible. That is, from the
-	 *	initial position to the final position (ent.x/y/z + mv.x/y/z),
+	 *	Performs full vector collision. That is, from the initial
+	 *	position to the final position (ent.x/y/z + mv.x/y/z),
 	 *	check all points along that path.
-	 *	The final position will not be ent + mv, if collision occurred;
-	 *	but in particular, it need not be colinear between (ent,
-	 *	ent + mv): to make wall sliding more satisfying, motion along
-	 *	the projection of mv onto the colliding wall is used.
+	 *	The final position will not be ent + mv, if collision
+	 *	occurred; the move is not just reduced in length, but need
+	 *	not be along (ent, ent + mv) either: to make wall sliding
+	 *	more satisfying, motion along the projection of mv onto the
+	 *	colliding wall is used.
 	 *	Movement is performed in segments, until the full movement
 	 *	vector is consumed: clear space until a wall or portal
 	 *	collision, then the projection along that line, or the
 	 *	continuation of the remaining movement vector into the next
 	 *	sector, and so on.
-	   In general, this will be an
+	 *
+	 *	To fully satisfy all
+	 *
 	 *	  intersection of lines problem, with special cases handing
 	 *	  start/end of lines, and corners (particularly because convex
 	 *	  corners are a product of one side within a sector, and one

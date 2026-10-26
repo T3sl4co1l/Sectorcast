@@ -7,11 +7,11 @@
 	"common.h"
 	"sectors.h"
 
-1792916169 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
+1793032968 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\sectors.h
 	<stdbool.h>
 	<stdint.h>
 
-1792865407 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
+1793032749 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\main.c
 	"main.h"
 	<windowsx.h>
 	<stdio.h>
@@ -32,7 +32,7 @@
 
 1792407120 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\common.h
 
-1792919221 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
+1793038256 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
 	<math.h>
 	<stdio.h>
 	<string.h>
@@ -40,7 +40,7 @@
 	"game.h"
 	"sectors.h"
 
-1792916223 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
+1793038300 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
 	<stdbool.h>
 	<stdint.h>
 	"sectors.h"

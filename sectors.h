@@ -24,21 +24,8 @@
 /** Threshold to decide whether a point is in front of the view plane (isPlane and isFront checks) */
 #define GRPH_PLANECOMPARE	0
 
-/* * * Type Declarations * * */
 
-/** Controls.buttons bit fields */
-enum GAMECTRL_e {
-	GAMECTRL_FWD         = 0x0001,
-	GAMECTRL_REV         = 0x0002,
-	GAMECTRL_TURNLEFT    = 0x0004,
-	GAMECTRL_TURNRIGHT   = 0x0008,
-	GAMECTRL_STRAFELEFT  = 0x0010,
-	GAMECTRL_STRAFERIGHT = 0x0020,
-	GAMECTRL_FLYUP       = 0x0040,
-	GAMECTRL_FLYDOWN     = 0x0080,
-	GAMECTRL_SPEED       = 0x0100,
-	GAMECTRL_SLIDE       = 0x0200
-};
+/* * * Type Declarations * * */
 
 typedef int TextureId;
 

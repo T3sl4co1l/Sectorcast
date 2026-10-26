@@ -16,13 +16,14 @@
 /** Speedup factor when holding GAMECTRL_SPEED */
 #define GAME_ACCELERATOR	1.6f
 /** Player collision radius */
-#define GAME_PLAYERSZ 	0.2f
+#define GAME_PLAYERSZ 	0.3f
 /** Player collision height */
-#define GAME_PLAYERHT 	0.4f
+#define GAME_PLAYERHT 	0.5f
 /** Player camera height (from bottom / z coordinate) */
-#define GAME_PLAYERCAM	0.3f
+#define GAME_PLAYERCAM	0.36f
 /** Smallest move increment for collision checking */
 #define GAME_MOVE_EPSILON	1e-8
+
 
 /* * * Type Declarations * * */
 
@@ -33,16 +34,32 @@ enum GAMETIC_e {
 	GAMETIC_PORTAL    = 0x0004,	/**< Crossed two-sided wall */
 };
 
+/** Controls.buttons bit fields */
+enum GAMECTRL_e {
+	GAMECTRL_FWD         = 0x0001,
+	GAMECTRL_REV         = 0x0002,
+	GAMECTRL_TURNLEFT    = 0x0004,
+	GAMECTRL_TURNRIGHT   = 0x0008,
+	GAMECTRL_STRAFELEFT  = 0x0010,
+	GAMECTRL_STRAFERIGHT = 0x0020,
+	GAMECTRL_FLYUP       = 0x0040,
+	GAMECTRL_FLYDOWN     = 0x0080,
+	GAMECTRL_SPEED       = 0x0100,
+	GAMECTRL_SLIDE       = 0x0200,
+	GAMECTRL_NOCLIP      = 0x0400
+};
+
 /** Flag parameter for collisionDetect() */
 enum GAME_COLLISION_e {
-	GAME_COLLISION_NONE,   	/**< No collision checks */
-	GAME_COLLISION_PORTALS,	/**< No wall collision checks; portals are taken (entity sector updated) (returns true when crossing 2-sided lines) */
-	GAME_COLLISION_NORMAL, 	/**< Normal movement, blocked by 1-sided walls and obstacles; free movement if out of bounds */
-	GAME_COLLISION_SNAP,   	/**< Snapped to nearest location within sector before applying movement (then NORMAL collision) */
-	GAME_COLLISION_CHEAP,  	/**< If collision would occur, don't move and return true */
+	GAME_COLLISION_NONE,   	/**< No collision checks (free X/Y/Z movement, no sector update) */
+	GAME_COLLISION_PORTALS,	/**< No obstacle collision checks, but portals are taken; snap Z within destination sector ceil/floor bounds */
+	GAME_COLLISION_CHEAP,  	/**< PORTALS, but if obstacle collision would occur, don't move */
+	GAME_COLLISION_NORMAL, 	/**< Normal movement, collision with 1-sided walls and low ceil/floor differences; free movement out-of-bounds */
+	GAME_COLLISION_SNAP,   	/**< OoB snapped to nearest in-bounds location within sector, before applying NORMAL movement */
 };
 
 //	For more definitions, see sectors.h
+
 
 /* * * Shared Globals * * */
 

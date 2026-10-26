@@ -126,9 +126,11 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 		       "    C          Move down\n"
 		       "    LARROW     Turn left\n"
 		       "    RARROW     Turn right\n"
-		       "    SHIFT      Speed\n"
+		       "    SHIFT      Speed on\n"
+		       "    SPACE      Strafe on\n"
 		       "    ESC        Quit\n"
 		       "    TAB        Capture/release mouse\n"
+		       "    F5         Toggle noclip\n"
 		       "\n");
 //	}
 //
@@ -227,14 +229,7 @@ int WINAPI WinMain(HINSTANCE hThisInstance, HINSTANCE hPrevInstance, LPSTR lpszA
 
 	//	Windows
 	while (GetMessage(&msg, NULL, 0, 0)) {
-		//	Dispatch drops ALT press?
-		if (msg.message == WM_SYSKEYDOWN && msg.wParam == VK_MENU) {
-			setKeyState((int)msg.wParam, true);
-		} else if (msg.message == WM_SYSKEYUP && msg.wParam == VK_MENU) {
-			setKeyState((int)msg.wParam, false);
-		} else {
-			DispatchMessage(&msg);
-		}
+		DispatchMessage(&msg);
 	}
 
 	return 0;
@@ -411,12 +406,18 @@ void setKeyState(int key, BOOL pressed) {
 	case VK_SHIFT:
 		k = GAMECTRL_SPEED;
 		break;
-	case VK_MENU:
+	case ' ':
 		k = GAMECTRL_SLIDE;
 		break;
 	case VK_TAB:
 		if (pressed)
 			toggleMouseCapture();
+		return;
+	case VK_F5:
+		if (pressed) {
+			game.ctrl.buttons ^= GAMECTRL_NOCLIP;
+			printf("Noclip %s\n", (game.ctrl.buttons & GAMECTRL_NOCLIP) ? "on" : "off");
+		}
 		return;
 	case VK_ESCAPE:
 		SendMessage(hMainWindow, WM_DESTROY, 0, 0);
