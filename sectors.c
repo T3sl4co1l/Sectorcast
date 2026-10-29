@@ -72,11 +72,11 @@ Sector sectors[] = {
 		side: {
 			{
 				secId: -1,
-				wallId: 3,
+				wallId: 4,
 				to: { -2.0f, 1.5f }
 			}, {
 				secId: -1,
-				wallId: 1,
+				wallId: 6,
 				to: { 1.0f, 1.5f }
 			}, {
 				secId: 1,

@@ -41,7 +41,7 @@ ARGB drawPalette[] = {
 	Color_DarkCyan,
 	Color_DarkRed,
 	Color_Purple,
-	Color_Brown,
+	Color_SaddleBrown,
 	Color_LightGray,
 	Color_DarkGray,
 	Color_LightBlue,

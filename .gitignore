@@ -2,3 +2,4 @@
 /Release/*.o
 /Release/*.lss
 /Release/*.lst
+/Tools/*.dbs

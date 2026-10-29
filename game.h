@@ -58,6 +58,15 @@ enum GAME_COLLISION_e {
 	GAME_COLLISION_SNAP,   	/**< OoB snapped to nearest in-bounds location within sector, before applying NORMAL movement */
 };
 
+/** isNearLine() container */
+typedef struct PointNearLine_s {
+	Vec2 start; 	/**< Line segment start vertex */
+	Vec2 end;   	/**< Line segment end vertex */
+	Vec2 point; 	/**< Point to test */
+	float dist; 	/**< Distance to compare against */
+	bool excludeBack;	/**< false: compare distance is to line from either side; true: front side only (back-side half-plane treated as "near") */
+} PointNearLine;
+
 //	For more definitions, see sectors.h
 
 
@@ -66,5 +75,6 @@ enum GAME_COLLISION_e {
 int doGameTic(GameContext* game);
 bool getControlMovement(Controls* ctrl, EntityPos* ent);
 int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type);
+bool isNearLine(PointNearLine* pnl);
 
 #endif // GAME_H_INCLUDED

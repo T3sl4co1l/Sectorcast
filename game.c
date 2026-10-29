@@ -230,13 +230,14 @@ int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type) {
 					}
 				} else if (type == GAME_COLLISION_CHEAP) {
 					//	single-sided, check if close enough to collide
-					float distSq = ent->radius * ent->radius;
-					float sideNormSq = (intr.end.x - intr.start.x) * (intr.end.x - intr.start.x)
-							+ (intr.end.y - intr.start.y) * (intr.end.y - intr.start.y);
-					distSq *= sideNormSq;
-					float crossSq = (intr.end.x - intr.start.x) * (intr.orig.y + intr.dir.y - intr.start.y)
-							- (intr.orig.x + intr.dir.x - intr.start.x) * (intr.end.y - intr.start.y);
-					if (crossSq * crossSq < distSq || crossSq > 0) {
+					PointNearLine pnl = {
+						{ intr.start.x, intr.start.y },
+						{ intr.end.x, intr.end.y },
+						{ intr.orig.x + intr.dir.x, intr.orig.y + intr.dir.y },
+						ent->radius,
+						true
+					};
+					if (isNearLine(&pnl)) {
 						//	movement would go into a wall hitbox or out-of-bounds, cancel the remainder
 #ifdef COLLISION_DEBUG
 						printf("1-sided collision, sec %i, side %i, distSq %e, crossSq %e\n", ent->secId, i, distSq, crossSq);
@@ -268,209 +269,98 @@ int collisionDetect(GameContext* game, EntityPos* ent, Vec3* mv, int type) {
 
 		return r;
 
-	} else if (type == GAME_COLLISION_NORMAL || type == GAME_COLLISION_SNAP) {
+	} else { // if (type == GAME_COLLISION_NORMAL || type == GAME_COLLISION_SNAP) {
 
 		if (type == GAME_COLLISION_SNAP) {
 			//	iterate over sides of sector, translating inward by radius; find nearest
 		}
 
-		return r;
-
-	}
 	/*
-	 *	Performs full vector collision. That is, from the initial
-	 *	position to the final position (ent.x/y/z + mv.x/y/z),
-	 *	check all points along that path.
-	 *	The final position will not be ent + mv, if collision
-	 *	occurred; the move is not just reduced in length, but need
-	 *	not be along (ent, ent + mv) either: to make wall sliding
-	 *	more satisfying, motion along the projection of mv onto the
-	 *	colliding wall is used.
+	 *	Performs full vector collision.  That is, check all points
+	 *	along the path; not just stepwise, or stopping at the first
+	 *	obstacle.  Compute exact distances, and bend the path as
+	 *	needed to slide along geometry in a reasonable manner.
+	 *
+	 *	If collision occurred, the final position will not be ent +
+	 *	mv; indeed the move might be aside the initial vector, to
+	 *	slide along the wall a bit (namely, the projection of mv on
+	 *	the wall gives the end point; assuming the end point didn't
+	 *	run off the end of the wall).
+	 *
 	 *	Movement is performed in segments, until the full movement
-	 *	vector is consumed: clear space until a wall or portal
-	 *	collision, then the projection along that line, or the
-	 *	continuation of the remaining movement vector into the next
-	 *	sector, and so on.
+	 *	vector is consumed: move through clear space until a wall or
+	 *	portal collision, then move by the projection of that line,
+	 *	or the remaining movement vector into the next sector, and
+	 *	so on.
 	 *
-	 *	To fully satisfy all
+	 *	Line ends are handled as semicircles.  This is complicated
+	 *	to solve, but besides providing the smoothest experience, it
+	 *	solves the problem of trying to follow line ends around
+	 *	concave corners (potentially through multiple sectors) and
+	 *	somehow capping them off.  Instead of having to resolve
+	 *	structure (sector connections), the map is flattened: all
+	 *	lines in the potential collision area are collected into an
+	 *	array.
 	 *
-	 *	  intersection of lines problem, with special cases handing
-	 *	  start/end of lines, and corners (particularly because convex
-	 *	  corners are a product of one side within a sector, and one
-	 *	  side in the next (adjacent) sector, straddling a 2-sided wall
-	 *	  -- or more if sectors are thin!).
-	 *	- Generally, geometry is virtually shrunk by GAME_PLAYERSZ so
-	 *	  that a point moves within that reduced interior space, as
-	 *	  opposed to testing a circular entity collider.
-	 *	- Corners are handled by simple intersection (convex sides),
-	 *	  or closing what would otherwise be an opening, with a single
-	 *	  diagonal line segment.  This permits movement quite close to
-	 *	  the apex of a very tight corner; avoid using corners over
-	 *	  90° or so for this reason.
-	 *	- First, if applicable, snap initial location within the initial
-	 *	  sector:
-	 *		- Check sidedness.  If not all sides show location as front-
-	 *		  facing, that location is outside the sector.
-	 *		- Find the nearest side(s) and intersect them:
-	 *		- If 0 <= .frac < 1, project to that side's position;
-	 *		- If one side has .frac >= 1, and the next < 0, find the
-	 *		  reduced position of the vertex between those sides (i.e.,
-	 *		  where the sides intersect after a lateral displacement
-	 *		  of GAME_PLAYERSZ).
-	 *	- Where a move intersects only one (1-sided) wall, use the
-	 *	  projection along that line.
-	 *	- Where a move intersects a wall beyond its end (Intersect.frac
-	 *	  >= 1),
-	 *	Depending on collision flags, check sides of the current sector:
-	 *	- Tentatively add
-	 *	- Quick elimination with rectangular bounding box (+GAME_PLAYERSZ);
-	 *	  this particularly optimizes rectilinear lines
-	 *	- Of passing sides, compute exact distance (or comparison via
-	 *	  norm-squared weighted distance) (option: pre-compute side length
-	 *	  to avoid sqrt() in loop)
-	 *	- Since a sector is closed and convex, all
+	 *	We can also displace colliding walls by ent->radius at the
+	 *	same time, so the solution uses simple line intersections
+	 *	(..and circles).
 	 *
-	 *	Collision flags: force into sector; all/normal collision; only 2-
-	 *	sided (take portals, ignore 1-sideds); none at all (basically
-	 *	freecam in current sector).
+	 *	Since collision can slide along a wall, the potential
+	 *	collision area (region around ent) is described by a circle
+	 *	not just around ent, but somewhat ahead (namely,
+	 *	ent + mv / 2), of radius ent->radius + |mv| / 2.
+	 *
+	 *	The remaining problem is overlapping geometry.  We have five
+	 *	cases in total:
+	 *	- None: free movement
+	 *	- Line or circle: slide along it (mv --> Proj(mv, line),
+	 *	  etc.)
+	 *	- Two lines: when sliding along the one line, another line
+	 *	  is met.  Slide to the intersection, then slide along the
+	 *	  second line; if this second move would cross the first
+	 *	  line, instead stop at the intersection.
+	 *	- Line and circle: similarly, slide along one until reaching
+	 *	  the intersection.  A touching line and circle have two
+	 *	  intersections (or one degenerate); resolve which one in
+	 *	  the correct direction(!).
+	 *	- Two circles: similarly, slide along one until reaching the
+	 *	  intersection.  Two overlapping circles, of the same size,
+	 *	  have two intersections (or one degenerate, or the full
+	 *	  locus of the circle if in exactly the same place -- but
+	 *	  this is prevented by removing duplicate vertices from the
+	 *	  list).
+	 *
+	 *	There is something of a state machine here, and transitions
+	 *	between all states can occur.  A free move can bump into
+	 *	a line or circle; a projected move can slide off the end of
+	 *	a line, into the adjoining circle; another circle could be
+	 *	nearby (overlapping) and movement ends in an inside corner.
+	 *	When a collision occurs, the colliding object is recorded,
+	 *	so that it can be: 1. ignored for the move along it, since
+	 *	that will give unstable or degenerate numerical results; and
+	 *	2. to keep it in context in case an intersection occurs.
+	 *	Thus an intersection is computed with the new collision and
+	 *	the previous (in-context) object.
 	 */
 
-/*
-	changedX = game->camX + mv.x; changedY = game->camY + mv.y;
-	//	Check if the move is even on the map
-	if (changedX < 1 || changedY < 1 || changedX >= (game->mapW - 1)
-			|| changedY >= (game->mapH - 1))
-		//	Out of bounds?  Hit the edge, don't move
-		return true;
-	//	Check for map collisions
-	//	Lower right corner of player
-	checkX[0] = changedX + GAME_PLAYERSZ; checkY[0] = changedY + GAME_PLAYERSZ;
-	//	lower left
-	checkX[1] = changedX - GAME_PLAYERSZ; checkY[1] = changedY + GAME_PLAYERSZ;
-	//	upper left
-	checkX[2] = changedX - GAME_PLAYERSZ; checkY[2] = changedY - GAME_PLAYERSZ;
-	//	upper right
-	checkX[3] = changedX + GAME_PLAYERSZ; checkY[3] = changedY - GAME_PLAYERSZ;
-	for (int i = 0; i < 4; i++) {
-		//	corners counts the number of points that are faulty:
-		//	0 = nothing, 1 = an outside corner, 2 = one side (or a
-		//	diagonal pinch), 3 = inside corner, 4 = trapped.
-		if (game->world[((int)checkX[i]) + ((int)checkY[i]) * game->mapW] > 0) {
-			pointNum[corners] = i;
-			corners++;
-		}
+		return r;
 	}
-	switch (corners) {
-	case 0:
-		//	No collisions, make the move
-		game->camX += mv.x; game->camY += mv.y;
-		return false;
-	case 1:
-		//	1 collision: an outside wall corner at pointNum[0].
-		blockX = (int)checkX[pointNum[0]];
-		blockY = (int)checkY[pointNum[0]];
-		switch (pointNum[0]) {
-		case 0:
-			//	Lower right corner of player is stuck
-			if (changedY > (blockY + changedX - blockX)) {
-				if (mv.x > 0) mv.x = 0;
-			} else {
-				if (mv.y > 0) mv.y = 0;
-			}
-			break;
-		case 1:
-			//	Lower left
-			blockX++;
-			if (changedY > (blockY - changedX + blockX)) {
-				if (mv.x < 0) mv.x = 0;
-			} else {
-				if (mv.y > 0) mv.y = 0;
-			}
-			break;
-		case 2:
-			//	Upper left
-			blockY++; blockX++;
-			if (changedY > (blockY + changedX - blockX)) {
-				if (mv.y < 0) mv.y = 0;
-			} else {
-				if (mv.x < 0) mv.x = 0;
-			}
-			break;
-		case 3:
-			//	Upper right
-			blockY++;
-			if (changedY > (blockY - changedX + blockX)) {
-				if (mv.y < 0) mv.y = 0;
-			} else {
-				if (mv.x > 0) mv.x = 0;
-			}
-			break;
-		default:
-			break;
-		}
-		break;
-	case 2:
-		//	Wall hit.
-		index = pointNum[0] + pointNum[1] * 4;
-		switch (index) {
-		case 4:
-			//	Bottom of player (0, 1)
-			if (mv.y > 0) mv.y = 0;
-			break;
-		case 9:
-			//	Left (1, 2)
-			if (mv.x < 0) mv.x = 0;
-			break;
-		case 14:
-			//	Top (2, 3)
-			if (mv.y < 0) mv.y = 0;
-			break;
-		case 12:
-			//	Right (3, 0)
-			if (mv.x > 0) mv.x = 0;
-			break;
-		case 8:
-		case 13:
-			//	Diagonal corners (partial inside corners (0, 2), (1, 3))
-			mv.x = 0; mv.y = 0;
-			break;
-		default:
-			break;
-		}
-		break;
-	case 3:
-		//	Inside corner: one free.  Allow motion in that direction.
-		index = pointNum[0] + pointNum[1] * 4 + pointNum[2] * 16;
-		switch (index) {
-		case 57:
-			//	Bottom right open (stuck points 1, 2, 3)
-			if (mv.x < 0) mv.x = 0;
-			if (mv.y < 0) mv.y = 0;
-			break;
-		case 56:
-			//	Bottom left (0, 2, 3)
-			if (mv.x > 0) mv.x = 0;
-			if (mv.y < 0) mv.y = 0;
-			break;
-		case 52:
-			//	Top left (0, 1, 3)
-			if (mv.x > 0) mv.x = 0;
-			if (mv.y > 0) mv.y = 0;
-			break;
-		case 36:
-			//	Top right (0, 1, 2)
-			if (mv.x < 0) mv.x = 0;
-			if (mv.y > 0) mv.y = 0;
-			break;
-		default:
-			break;
-		}
-		break;
-	default:
-		//	Stuck in a block?!
-		break;
-	}
-*/
 
-	return false;
+}
+
+/**
+ *	Checks if a point is within given distance of a line.
+ *	@param pnl
+ */
+bool isNearLine(PointNearLine* pnl) {
+
+	float distSq = pnl->dist * pnl->dist;
+	float sideNormSq = (pnl->end.x - pnl->start.x) * (pnl->end.x - pnl->start.x)
+			+ (pnl->end.y - pnl->start.y) * (pnl->end.y - pnl->start.y);
+	distSq *= sideNormSq;
+	float crossSq = (pnl->end.x - pnl->start.x) * (pnl->point.y - pnl->start.y)
+			- (pnl->point.x - pnl->start.x) * (pnl->end.y - pnl->start.y);
+
+	return (crossSq * crossSq < distSq || (pnl->excludeBack && crossSq > 0));
 }

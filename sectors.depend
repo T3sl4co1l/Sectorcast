@@ -32,7 +32,7 @@
 
 1792407120 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\common.h
 
-1793038256 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
+1793127732 source:e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.c
 	<math.h>
 	<stdio.h>
 	<string.h>
@@ -40,7 +40,7 @@
 	"game.h"
 	"sectors.h"
 
-1793038300 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
+1793065672 e:\documents and settings\tim williams\my documents\watcom c compiler\projects\sectors\game.h
 	<stdbool.h>
 	<stdint.h>
 	"sectors.h"
